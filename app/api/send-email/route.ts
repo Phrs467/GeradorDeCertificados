@@ -139,9 +139,7 @@ export async function POST(request: NextRequest) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  // Se seu repositório for user.github.io, não precisa basePath
-  // Se for user.github.io/nome-repo, adicione:
-  // basePath: '/nome-repo',
-  // assetPrefix: '/nome-repo/',
+  basePath: '/GeradorDeCertificados',
+  assetPrefix: '/GeradorDeCertificados/',
 }
 export default nextConfig
