@@ -6,7 +6,7 @@ export function generatePasswordResetEmail(nome: string, resetLink: string): str
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Alterar Senha - Ownl Tech</title>
+      <title>Alterar Senha - Owl Tech</title>
       <style>
         * {
           margin: 0;
@@ -172,7 +172,7 @@ export function generatePasswordResetEmail(nome: string, resetLink: string): str
     <body>
       <div class="email-container">
         <div class="header">
-          <h1>🔐 Ownl Tech</h1>
+          <h1>🔐 Owl Tech</h1>
           <p>Sistema de Certificados</p>
         </div>
         
@@ -207,12 +207,12 @@ export function generatePasswordResetEmail(nome: string, resetLink: string): str
           </div>
           
           <div class="notice">
-            <strong>📧 Nota:</strong> Este email foi enviado através do serviço Resend. Se você não solicitou esta alteração ou tem dúvidas, entre em contato com o suporte técnico.
+            <strong>📧 Nota:</strong> Este email foi enviado através do serviço Owl Tech. Se você não solicitou esta alteração ou tem dúvidas, entre em contato com o suporte técnico.
           </div>
         </div>
         
         <div class="footer">
-          <p><strong>© 2024 Ownl Tech</strong></p>
+          <p><strong>© 2023 Owl Tech</strong></p>
           <p>Todos os direitos reservados</p>
           <p>Este é um email automático, não responda a esta mensagem</p>
         </div>
