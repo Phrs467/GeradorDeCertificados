@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     const resendApiKey = process.env.RESEND_API_KEY
     // Usar domínio padrão do Resend que não precisa de verificação
     const fromEmail = process.env.FROM_EMAIL || "onboarding@resend.dev"
-    const fromName = process.env.FROM_NAME || "Sistema Ownl Tech"
+    const fromName = process.env.FROM_NAME || "Sistema Owl Tech"
 
     if (!resendApiKey) {
       console.log("⚠️ RESEND_API_KEY não configurada. Simulando envio de email...")
@@ -39,12 +39,12 @@ export async function POST(request: NextRequest) {
             { status: 400 },
           )
         }
-        subject = "🔑 Alterar Senha - Ownl Tech"
+        subject = "🔑 Alterar Senha - Owl Tech"
         html = generatePasswordResetEmail(nome, resetLink)
         break
 
       case "password-changed":
-        subject = "✅ Senha Alterada com Sucesso - Ownl Tech"
+        subject = "✅ Senha Alterada com Sucesso - Owl Tech"
         html = generatePasswordChangedEmail(nome)
         break
 
@@ -135,3 +135,13 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  output: 'export',
+  // Se seu repositório for user.github.io, não precisa basePath
+  // Se for user.github.io/nome-repo, adicione:
+  // basePath: '/nome-repo',
+  // assetPrefix: '/nome-repo/',
+}
+export default nextConfig
