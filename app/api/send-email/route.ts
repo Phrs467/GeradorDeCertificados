@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { generatePasswordResetEmail, generatePasswordChangedEmail } from "@/lib/email-service"
+import { Resend } from 'resend'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +12,6 @@ export async function POST(request: NextRequest) {
     }
 
     const resendApiKey = process.env.RESEND_API_KEY
-    // Usar domínio padrão do Resend que não precisa de verificação
     const fromEmail = process.env.FROM_EMAIL || "onboarding@resend.dev"
     const fromName = process.env.FROM_NAME || "Sistema Owl Tech"
 
@@ -57,73 +57,29 @@ export async function POST(request: NextRequest) {
     console.log("📧 De:", `${fromName} <${fromEmail}>`)
     console.log("📧 Assunto:", subject)
 
-    // Envio real com Resend usando domínio verificado
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${resendApiKey}`,
-      },
-      body: JSON.stringify({
-        from: `${fromName} <${fromEmail}>`,
-        to: [to],
-        subject: subject,
-        html: html,
-      }),
+    // Usar a API oficial do Resend
+    const resend = new Resend(resendApiKey)
+    
+    const { data, error } = await resend.emails.send({
+      from: `${fromName} <${fromEmail}>`,
+      to: [to],
+      subject: subject,
+      html: html,
     })
 
-    const responseData = await response.json()
-
-    if (!response.ok) {
-      console.error("❌ Erro no Resend:", responseData)
-
-      // Se for erro de domínio não verificado, usar fallback
-      if (responseData.error && responseData.error.includes("domain is not verified")) {
-        console.log("⚠️ Domínio não verificado, usando fallback...")
-
-        // Tentar novamente com domínio padrão do Resend
-        const fallbackResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${resendApiKey}`,
-          },
-          body: JSON.stringify({
-            from: `${fromName} <onboarding@resend.dev>`,
-            to: [to],
-            subject: subject,
-            html: html,
-          }),
-        })
-
-        const fallbackData = await fallbackResponse.json()
-
-        if (!fallbackResponse.ok) {
-          console.error("❌ Erro no fallback:", fallbackData)
-          return NextResponse.json(
-            {
-              success: false,
-              error: fallbackData.message || "Erro ao enviar email",
-            },
-            { status: 500 },
-          )
-        }
-
-        console.log("✅ Email enviado com sucesso via fallback:", fallbackData)
-        return NextResponse.json({ success: true, data: fallbackData, fallback: true })
-      }
-
+    if (error) {
+      console.error("❌ Erro no Resend:", error)
       return NextResponse.json(
         {
           success: false,
-          error: responseData.message || responseData.error || "Erro ao enviar email",
+          error: error.message || "Erro ao enviar email",
         },
         { status: 500 },
       )
     }
 
-    console.log("✅ Email enviado com sucesso via Resend:", responseData)
-    return NextResponse.json({ success: true, data: responseData })
+    console.log("✅ Email enviado com sucesso via Resend:", data)
+    return NextResponse.json({ success: true, data: data })
   } catch (error) {
     console.error("❌ Erro ao enviar email:", error)
     return NextResponse.json(

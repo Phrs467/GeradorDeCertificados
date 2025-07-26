@@ -9,14 +9,28 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase } from "@/lib/supabase"
 import { hashPassword, isTokenExpired, formatExpirationTime } from "@/lib/password-utils"
 import { sendEmailClient } from "@/lib/email-client"
 import { AlertCircle, CheckCircle, Eye, EyeOff, Clock } from "lucide-react"
+import { firebaseAuth } from "@/lib/firebase"
+import { confirmPasswordReset, verifyPasswordResetCode, updatePassword, createUserWithEmailAndPassword } from "firebase/auth"
+import { getFirestore, collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore"
+
+// Definir tipo auxiliar para os dados do usuário
+interface UsuarioFirestore {
+  id: string
+  nome: string
+  email: string
+  reset_token: string | null
+  reset_token_expires: string | null
+  [key: string]: any
+}
 
 export default function AlterarSenhaPage() {
   const searchParams = useSearchParams()
-  const token = searchParams.get("token")
+  const oobCode = searchParams.get("oobCode") // Firebase usa oobCode para reset de senha
+  const primeiroLogin = searchParams.get("primeiro_login") === "true"
+  const emailParam = searchParams.get("email")
 
   const [novaSenha, setNovaSenha] = useState("")
   const [confirmarSenha, setConfirmarSenha] = useState("")
@@ -26,177 +40,95 @@ export default function AlterarSenhaPage() {
   const [tokenValid, setTokenValid] = useState<boolean | null>(null)
   const [userName, setUserName] = useState("")
   const [userEmail, setUserEmail] = useState("")
-  const [tokenExpiration, setTokenExpiration] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [debugInfo, setDebugInfo] = useState<any>(null)
 
   useEffect(() => {
-    if (token) {
+    if (primeiroLogin && emailParam) {
+      // Fluxo de primeiro login
+      validatePrimeiroLogin()
+    } else if (oobCode) {
+      // Fluxo de redefinição de senha
       validateToken()
     } else {
-      setError("Token de reset não fornecido na URL")
+      setError("Parâmetros inválidos na URL")
       setTokenValid(false)
     }
-  }, [token])
+  }, [oobCode, primeiroLogin, emailParam])
+
+  const validatePrimeiroLogin = async () => {
+    try {
+      console.log("🔍 === VALIDANDO PRIMEIRO LOGIN ===")
+      console.log("📧 Email:", emailParam)
+
+      if (!emailParam) {
+        setError("Email não fornecido")
+        setTokenValid(false)
+        return
+      }
+
+      // Buscar dados do usuário no Firestore
+      const firestore = getFirestore()
+      const usuariosRef = collection(firestore, "usuarios")
+      const q = query(usuariosRef, where("email", "==", emailParam.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+
+      if (querySnapshot.empty) {
+        setError("Usuário não encontrado no sistema")
+        setTokenValid(false)
+        return
+      }
+
+      const usuarioDoc = querySnapshot.docs[0]
+      const usuario = usuarioDoc.data()
+
+      // Verificar se é realmente primeiro login
+      if (!usuario.primeiro_login) {
+        setError("Este não é um primeiro login")
+        setTokenValid(false)
+        return
+      }
+
+      setUserEmail(emailParam)
+      setUserName(usuario.nome || "Usuário")
+      setTokenValid(true)
+
+    } catch (err: any) {
+      console.error("❌ Erro ao validar primeiro login:", err)
+      setError("Erro ao validar primeiro login")
+      setTokenValid(false)
+    }
+  }
 
   const validateToken = async () => {
     try {
-      console.log("🔍 === INICIANDO VALIDAÇÃO DE TOKEN ===")
-      console.log("🔑 Token recebido:", token)
-      console.log("📏 Tamanho do token:", token?.length)
-      console.log("🔤 Tipo do token:", typeof token)
+      console.log("🔍 === VALIDANDO TOKEN DE REDEFINIÇÃO ===")
+      console.log("🔑 Código recebido:", oobCode)
 
-      if (!token || token.length < 10) {
-        console.error("❌ Token inválido ou muito curto")
-        setError("Token inválido")
+      if (!oobCode || oobCode.length < 10) {
+        console.error("❌ Código inválido ou muito curto")
+        setError("Código de redefinição inválido")
         setTokenValid(false)
         return
       }
 
-      // Teste 1: Contar quantos tokens existem no banco
-      console.log("🔍 TESTE 1: Contando tokens no banco...")
-      const { count, error: countError } = await supabase
-        .from("usuarios")
-        .select("*", { count: "exact", head: true })
-        .not("reset_token", "is", null)
-
-      console.log("📊 Quantidade de tokens no banco:", count)
-      console.log("❌ Erro na contagem:", countError)
-
-      // Teste 2: Buscar TODOS os tokens para comparação
-      console.log("🔍 TESTE 2: Buscando TODOS os tokens...")
-      const { data: allTokens, error: allTokensError } = await supabase
-        .from("usuarios")
-        .select("id, nome, email, reset_token, reset_token_expires")
-        .not("reset_token", "is", null)
-
-      console.log("📊 Todos os tokens encontrados:", allTokens)
-      console.log("❌ Erro na busca geral:", allTokensError)
-
-      // Teste 3: Buscar especificamente pelo token usando diferentes métodos
-      console.log("🔍 TESTE 3: Busca específica pelo token...")
-
-      // Método 1: Busca direta
-      const { data: usuarios1, error: error1 } = await supabase
-        .from("usuarios")
-        .select("nome, email, reset_token, reset_token_expires")
-        .eq("reset_token", token)
-
-      console.log("📊 Método 1 (eq):", { usuarios: usuarios1?.length || 0, error: error1 })
-
-      // Método 2: Busca com filtro
-      const { data: usuarios2, error: error2 } = await supabase
-        .from("usuarios")
-        .select("nome, email, reset_token, reset_token_expires")
-        .filter("reset_token", "eq", token)
-
-      console.log("📊 Método 2 (filter):", { usuarios: usuarios2?.length || 0, error: error2 })
-
-      // Método 3: Busca com SQL raw (se possível)
-      console.log("🔍 TESTE 4: Comparação manual de tokens...")
-      let tokenMatch = null
-      if (allTokens && allTokens.length > 0) {
-        tokenMatch = allTokens.find((t) => t.reset_token === token)
-        console.log("🔍 Token encontrado na comparação manual:", !!tokenMatch)
-
-        // Comparar caractere por caractere
-        allTokens.forEach((t, index) => {
-          console.log(`🔍 Token ${index + 1}:`)
-          console.log(`  - Email: ${t.email}`)
-          console.log(`  - Token no banco: "${t.reset_token}"`)
-          console.log(`  - Token recebido: "${token}"`)
-          console.log(`  - Iguais: ${t.reset_token === token}`)
-          console.log(`  - Tamanho banco: ${t.reset_token?.length}`)
-          console.log(`  - Tamanho recebido: ${token.length}`)
-
-          if (t.reset_token && token) {
-            // Comparar os primeiros 20 caracteres
-            const banco20 = t.reset_token.substring(0, 20)
-            const recebido20 = token.substring(0, 20)
-            console.log(`  - Primeiros 20 (banco): "${banco20}"`)
-            console.log(`  - Primeiros 20 (recebido): "${recebido20}"`)
-            console.log(`  - Primeiros 20 iguais: ${banco20 === recebido20}`)
-          }
-        })
-      }
-
-      // Usar o resultado da busca
-      const usuarios = usuarios1 || usuarios2 || (tokenMatch ? [tokenMatch] : [])
-
-      setDebugInfo({
-        tokenRecebido: token,
-        tamanhoToken: token?.length,
-        tipoToken: typeof token,
-        totalTokensNoBanco: count || 0,
-        usuariosEncontrados: usuarios?.length || 0,
-        metodo1Resultado: usuarios1?.length || 0,
-        metodo2Resultado: usuarios2?.length || 0,
-        comparacaoManual: !!tokenMatch,
-        erro1: error1?.message,
-        erro2: error2?.message,
-        todosTokens: allTokens?.map((t) => ({
-          email: t.email,
-          token: t.reset_token?.substring(0, 20) + "...",
-          tokenCompleto: t.reset_token,
-          expires: t.reset_token_expires,
-          tokenMatch: t.reset_token === token,
-          tamanhoToken: t.reset_token?.length,
-        })),
-      })
-
-      if (!usuarios || usuarios.length === 0) {
-        console.error("❌ Nenhum usuário encontrado com este token")
-        setError("Token inválido ou não encontrado")
-        setTokenValid(false)
-        return
-      }
-
-      if (usuarios.length > 1) {
-        console.error("❌ Múltiplos usuários com o mesmo token encontrados")
-        setError("Erro: múltiplos tokens encontrados")
-        setTokenValid(false)
-        return
-      }
-
-      const usuario = usuarios[0]
-
-      console.log("✅ Usuário encontrado:", {
-        nome: usuario.nome,
-        email: usuario.email,
-        tokenMatch: usuario.reset_token === token,
-        expires: usuario.reset_token_expires,
-      })
-
-      // Verificar se o token realmente corresponde (comparação extra)
-      if (usuario.reset_token !== token) {
-        console.error("❌ Token não corresponde exatamente")
-        console.log("Token esperado:", token)
-        console.log("Token no banco:", usuario.reset_token)
-        setError("Token não corresponde")
-        setTokenValid(false)
-        return
-      }
-
-      console.log("⏰ Verificando expiração...")
-      console.log("🕐 Token expira em:", usuario.reset_token_expires)
-      console.log("🕐 Data atual:", new Date().toISOString())
-
-      if (isTokenExpired(usuario.reset_token_expires)) {
-        console.error("❌ Token expirado")
-        setError(`Token expirado. Solicite um novo link de alteração de senha.`)
-        setTokenValid(false)
-        return
-      }
-
-      console.log("✅ Token válido e não expirado")
-      setUserName(usuario.nome)
-      setUserEmail(usuario.email)
-      setTokenExpiration(formatExpirationTime(usuario.reset_token_expires))
+      // Verificar se o código é válido usando Firebase
+      const email = await verifyPasswordResetCode(firebaseAuth, oobCode)
+      console.log("✅ Código válido para email:", email)
+      
+      setUserEmail(email)
+      setUserName("Usuário") // Nome será buscado do Firestore se necessário
       setTokenValid(true)
-    } catch (err) {
-      console.error("❌ Erro ao validar token:", err)
-      setError("Erro interno ao validar token")
+
+    } catch (err: any) {
+      console.error("❌ Erro ao validar código:", err)
+      if (err.code === "auth/invalid-action-code") {
+        setError("Código de redefinição inválido ou expirado")
+      } else if (err.code === "auth/expired-action-code") {
+        setError("Código de redefinição expirado. Solicite um novo link.")
+      } else {
+        setError("Erro ao validar código de redefinição")
+      }
       setTokenValid(false)
     }
   }
@@ -245,44 +177,122 @@ export default function AlterarSenhaPage() {
         return
       }
 
-      // Criptografar nova senha
-      console.log("🔐 Criptografando senha...")
-      const hashedPassword = await hashPassword(novaSenha)
-      console.log("✅ Senha criptografada")
+      if (primeiroLogin) {
+        // Fluxo de primeiro login - criar usuário no Firebase Auth e atualizar Firestore
+        console.log("🆕 Primeiro login - criando usuário no Firebase Auth e atualizando Firestore")
+        
+        const firestore = getFirestore()
+        const usuariosRef = collection(firestore, "usuarios")
+        const q = query(usuariosRef, where("email", "==", userEmail.toLowerCase()))
+        const querySnapshot = await getDocs(q)
+        
+        if (querySnapshot.empty) {
+          setError("Usuário não encontrado")
+          setLoading(false)
+          return
+        }
 
-      // Atualizar senha no banco
-      console.log("💾 Atualizando no banco...")
-      const { error: updateError } = await supabase
-        .from("usuarios")
-        .update({
-          senha: hashedPassword,
-          primeiro_login: false,
-          reset_token: null,
-          reset_token_expires: null,
-        })
-        .eq("reset_token", token)
+        const usuarioDoc = querySnapshot.docs[0]
+        const usuario = usuarioDoc.data()
+        
+        try {
+          // Criar usuário no Firebase Auth
+          console.log("🔐 Criando usuário no Firebase Auth...")
+          console.log("📧 Email:", userEmail)
+          console.log("🔑 Senha:", novaSenha ? "***" + novaSenha.slice(-3) : "vazia")
+          const userCredential = await createUserWithEmailAndPassword(firebaseAuth, userEmail, novaSenha)
+          console.log("✅ Usuário criado no Firebase Auth com UID:", userCredential.user.uid)
+          
+          // Criptografar senha para salvar no Firestore (backup)
+          const hashedPassword = await hashPassword(novaSenha)
+          
+          // Atualizar dados no Firestore
+          await updateDoc(usuarioDoc.ref, {
+            senha: hashedPassword,
+            primeiro_login: false,
+            updated_at: new Date().toISOString(),
+          })
+          
+          console.log("✅ Dados atualizados no Firestore para primeiro login")
+        } catch (authError: any) {
+          console.error("❌ Erro ao criar usuário no Firebase Auth:", authError)
+          
+          if (authError.code === "auth/email-already-in-use") {
+            // Usuário já existe no Firebase Auth, apenas atualizar senha
+            console.log("⚠️ Usuário já existe no Firebase Auth, atualizando senha...")
+            
+            // Criptografar senha para salvar no Firestore
+            const hashedPassword = await hashPassword(novaSenha)
+            
+            await updateDoc(usuarioDoc.ref, {
+              senha: hashedPassword,
+              primeiro_login: false,
+              updated_at: new Date().toISOString(),
+            })
+            
+            console.log("✅ Senha atualizada no Firestore (usuário já existia no Auth)")
+          } else {
+            throw authError
+          }
+        }
+      } else {
+        // Fluxo de redefinição de senha
+        if (!oobCode || typeof oobCode !== 'string') {
+          setError("Código de redefinição inválido.")
+          setLoading(false)
+          return
+        }
 
-      if (updateError) {
-        console.error("❌ Erro ao atualizar senha:", updateError)
-        setError("Erro ao atualizar senha. Tente novamente.")
-        setLoading(false)
-        return
+        // Resetar senha no Firebase Auth usando o código
+        await confirmPasswordReset(firebaseAuth, oobCode, novaSenha)
+        console.log("✅ Senha alterada no Firebase Auth")
+
+        // Atualizar campos adicionais no Firestore (se necessário)
+        try {
+          const firestore = getFirestore()
+          const usuariosRef = collection(firestore, "usuarios")
+          const q = query(usuariosRef, where("email", "==", userEmail.toLowerCase()))
+          const querySnapshot = await getDocs(q)
+          
+          if (!querySnapshot.empty) {
+            const usuarioDoc = querySnapshot.docs[0]
+            await updateDoc(usuarioDoc.ref, {
+              primeiro_login: false,
+              updated_at: new Date().toISOString(),
+            })
+            console.log("✅ Dados do usuário atualizados no Firestore")
+          }
+        } catch (firestoreError) {
+          console.warn("⚠️ Erro ao atualizar dados no Firestore:", firestoreError)
+          // Não falha o processo se não conseguir atualizar o Firestore
+        }
       }
-
-      console.log("✅ Senha atualizada com sucesso!")
 
       // Enviar email de confirmação via API route
       console.log("📧 Enviando email de confirmação...")
-      await sendEmailClient({
-        type: "password-changed",
-        to: userEmail,
-        nome: userName,
-      })
+      try {
+        await sendEmailClient({
+          type: "password-changed",
+          to: userEmail,
+          nome: userName,
+        })
+      } catch (emailError) {
+        console.warn("⚠️ Erro ao enviar email de confirmação:", emailError)
+        // Não falha o processo se não conseguir enviar o email
+      }
 
       setSuccess(true)
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Erro ao alterar senha:", err)
-      setError("Erro interno. Tente novamente.")
+      if (err.code === "auth/invalid-action-code") {
+        setError("Código de redefinição inválido ou expirado")
+      } else if (err.code === "auth/expired-action-code") {
+        setError("Código de redefinição expirado. Solicite um novo link.")
+      } else if (err.code === "auth/weak-password") {
+        setError("A senha é muito fraca. Escolha uma senha mais forte.")
+      } else {
+        setError("Erro interno. Tente novamente.")
+      }
     } finally {
       setLoading(false)
     }
@@ -294,7 +304,9 @@ export default function AlterarSenhaPage() {
         <Card className="w-full max-w-md mx-4">
           <CardContent className="p-6 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-2 text-gray-600">🔍 Validando token...</p>
+            <p className="mt-2 text-gray-600">
+              {primeiroLogin ? "🔍 Validando primeiro login..." : "🔍 Validando código..."}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -307,96 +319,23 @@ export default function AlterarSenhaPage() {
         <Card className="w-full max-w-4xl mx-4">
           <CardHeader className="text-center">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <CardTitle style={{ color: "#06459a" }}>❌ Token Inválido</CardTitle>
+            <CardTitle style={{ color: "#06459a" }}>
+              {primeiroLogin ? "❌ Erro no Primeiro Login" : "❌ Código Inválido"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
-
-            {/* Informações de debug super detalhadas */}
-            {debugInfo && (
-              <div className="mt-4 p-4 bg-gray-50 rounded-md">
-                <p className="text-sm font-bold text-gray-700 mb-3">🔍 Debug Detalhado:</p>
-                <div className="text-xs text-gray-600 space-y-3">
-                  {/* Informações básicas */}
-                  <div className="bg-white p-3 rounded border">
-                    <div className="font-semibold mb-2">📊 Informações Básicas:</div>
-                    <div>
-                      Token recebido: <code className="bg-gray-100 p-1 rounded">{debugInfo.tokenRecebido}</code>
-                    </div>
-                    <div>Tamanho: {debugInfo.tamanhoToken} caracteres</div>
-                    <div>Tipo: {debugInfo.tipoToken}</div>
-                    <div>Total de tokens no banco: {debugInfo.totalTokensNoBanco}</div>
-                  </div>
-
-                  {/* Resultados das buscas */}
-                  <div className="bg-white p-3 rounded border">
-                    <div className="font-semibold mb-2">🔍 Resultados das Buscas:</div>
-                    <div>Método 1 (eq): {debugInfo.metodo1Resultado} usuários</div>
-                    <div>Método 2 (filter): {debugInfo.metodo2Resultado} usuários</div>
-                    <div>Comparação manual: {debugInfo.comparacaoManual ? "✅ Encontrado" : "❌ Não encontrado"}</div>
-                    {debugInfo.erro1 && <div>Erro método 1: {debugInfo.erro1}</div>}
-                    {debugInfo.erro2 && <div>Erro método 2: {debugInfo.erro2}</div>}
-                  </div>
-
-                  {/* Tokens no banco */}
-                  {debugInfo.todosTokens && debugInfo.todosTokens.length > 0 && (
-                    <div className="bg-white p-3 rounded border">
-                      <div className="font-semibold mb-2">🔑 Tokens no Banco ({debugInfo.todosTokens.length}):</div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {debugInfo.todosTokens.map((t: any, i: number) => (
-                          <div key={i} className="bg-gray-50 p-2 rounded border-l-4 border-blue-500">
-                            <div>
-                              <strong>Email:</strong> {t.email}
-                            </div>
-                            <div>
-                              <strong>Token (início):</strong> {t.token}
-                            </div>
-                            <div>
-                              <strong>Tamanho:</strong> {t.tamanhoToken} caracteres
-                            </div>
-                            <div>
-                              <strong>Expira:</strong> {new Date(t.expires).toLocaleString("pt-BR")}
-                            </div>
-                            <div>
-                              <strong>Match:</strong>{" "}
-                              <span className={t.tokenMatch ? "text-green-600" : "text-red-600"}>
-                                {t.tokenMatch ? "✅ SIM" : "❌ NÃO"}
-                              </span>
-                            </div>
-                            {!t.tokenMatch && (
-                              <details className="mt-2">
-                                <summary className="cursor-pointer text-blue-600">Ver token completo</summary>
-                                <div className="mt-1 p-2 bg-white rounded border">
-                                  <div>
-                                    <strong>Token no banco:</strong>
-                                  </div>
-                                  <code className="text-xs break-all">{t.tokenCompleto}</code>
-                                  <div className="mt-1">
-                                    <strong>Token recebido:</strong>
-                                  </div>
-                                  <code className="text-xs break-all">{debugInfo.tokenRecebido}</code>
-                                </div>
-                              </details>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Button
-              onClick={() => (window.location.href = "/")}
-              className="w-full mt-4"
-              style={{ backgroundColor: "#06459a", color: "#ffffff" }}
-            >
-              🔙 Voltar ao Login
-            </Button>
+            <div className="mt-4 text-center">
+              <Button
+                onClick={() => window.location.href = '/'}
+                style={{ backgroundColor: "#06459a", color: "#ffffff" }}
+              >
+                Voltar ao Login
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -409,22 +348,25 @@ export default function AlterarSenhaPage() {
         <Card className="w-full max-w-md mx-4">
           <CardHeader className="text-center">
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-            <CardTitle style={{ color: "#06459a" }}>✅ Senha Alterada!</CardTitle>
+            <CardTitle style={{ color: "#06459a" }}>
+              {primeiroLogin ? "✅ Senha Criada!" : "✅ Senha Alterada!"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="text-center">
             <p className="text-gray-600 mb-4">
-              Parabéns, <strong>{userName}</strong>! Sua senha foi alterada com sucesso.
+              {primeiroLogin 
+                ? <>Parabéns, <strong>{userName}</strong>! Sua senha foi criada com sucesso.</>
+                : <>Parabéns, <strong>{userName}</strong>! Sua senha foi alterada com sucesso.</>
+              }
             </p>
-            <p className="text-sm text-gray-500 mb-4">
-              Enviamos um email de confirmação para <strong>{userEmail}</strong>.
+            <p className="text-sm text-gray-600 mb-4">
+              Agora você pode fazer login com sua nova senha.
             </p>
-            <p className="text-sm text-gray-600 mb-4">Agora você pode fazer login com sua nova senha.</p>
             <Button
-              onClick={() => (window.location.href = "/")}
-              className="w-full"
+              onClick={() => window.location.href = '/'}
               style={{ backgroundColor: "#06459a", color: "#ffffff" }}
             >
-              🔐 Ir para Login
+              Ir para o Login
             </Button>
           </CardContent>
         </Card>
@@ -436,22 +378,21 @@ export default function AlterarSenhaPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#06459a" }}>
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="text-center">
-          <CardTitle style={{ color: "#06459a" }}>🔑 Alterar Senha</CardTitle>
-          <p className="text-sm text-gray-600">
-            Olá, <strong>{userName}</strong>!
-          </p>
-          <p className="text-sm text-gray-500">({userEmail})</p>
-          {tokenExpiration && (
-            <div className="flex items-center justify-center gap-1 text-xs text-orange-600 mt-2">
-              <Clock className="h-3 w-3" />
-              {tokenExpiration}
-            </div>
+          <CardTitle style={{ color: "#06459a" }}>
+            {primeiroLogin ? "🔑 Criar Senha" : "🔑 Alterar Senha"}
+          </CardTitle>
+          {primeiroLogin && (
+            <p className="text-sm text-gray-600">
+              Olá, <strong>{userName}</strong>! Crie sua primeira senha.
+            </p>
           )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="novaSenha">Nova Senha</Label>
+              <Label htmlFor="novaSenha">
+                {primeiroLogin ? "Nova Senha" : "Nova Senha"}
+              </Label>
               <div className="relative">
                 <Input
                   id="novaSenha"
@@ -459,7 +400,7 @@ export default function AlterarSenhaPage() {
                   value={novaSenha}
                   onChange={(e) => setNovaSenha(e.target.value)}
                   required
-                  placeholder="Digite sua nova senha"
+                  placeholder={primeiroLogin ? "Digite sua nova senha" : "Digite sua nova senha"}
                 />
                 <Button
                   type="button"
@@ -474,7 +415,9 @@ export default function AlterarSenhaPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmarSenha">Confirmar Nova Senha</Label>
+              <Label htmlFor="confirmarSenha">
+                {primeiroLogin ? "Confirmar Senha" : "Confirmar Nova Senha"}
+              </Label>
               <div className="relative">
                 <Input
                   id="confirmarSenha"
@@ -482,7 +425,7 @@ export default function AlterarSenhaPage() {
                   value={confirmarSenha}
                   onChange={(e) => setConfirmarSenha(e.target.value)}
                   required
-                  placeholder="Confirme sua nova senha"
+                  placeholder={primeiroLogin ? "Confirme sua senha" : "Confirme sua nova senha"}
                 />
                 <Button
                   type="button"
@@ -496,19 +439,6 @@ export default function AlterarSenhaPage() {
               </div>
             </div>
 
-            <div className="text-xs text-gray-600 space-y-1 bg-gray-50 p-3 rounded">
-              <p>
-                <strong>📋 Requisitos da senha:</strong>
-              </p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>Pelo menos 8 caracteres</li>
-                <li>Uma letra maiúscula (A-Z)</li>
-                <li>Uma letra minúscula (a-z)</li>
-                <li>Um número (0-9)</li>
-                <li>Um caractere especial (!@#$%^&*)</li>
-              </ul>
-            </div>
-
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -516,13 +446,29 @@ export default function AlterarSenhaPage() {
               </Alert>
             )}
 
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-800 font-semibold mb-2">📋 Requisitos da senha:</p>
+              <ul className="text-xs text-blue-700 space-y-1">
+                <li>• Pelo menos 8 caracteres</li>
+                <li>• Pelo menos uma letra maiúscula</li>
+                <li>• Pelo menos uma letra minúscula</li>
+                <li>• Pelo menos um número</li>
+                <li>• Pelo menos um caractere especial (!@#$%^&*)</li>
+              </ul>
+            </div>
+
             <Button
               type="submit"
-              className="w-full"
               disabled={loading}
+              className="w-full"
               style={{ backgroundColor: "#06459a", color: "#ffffff" }}
             >
-              {loading ? "🔄 Alterando..." : "🔑 Alterar Senha"}
+              {loading 
+                ? "🔄 Processando..." 
+                : primeiroLogin 
+                ? "🔑 Criar Senha" 
+                : "🔑 Alterar Senha"
+              }
             </Button>
           </form>
         </CardContent>

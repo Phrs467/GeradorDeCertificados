@@ -8,13 +8,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { supabase, type Usuario } from "@/lib/supabase"
 import { comparePassword, isBcryptHash } from "@/lib/password-utils"
 import { sendEmailClient } from "@/lib/email-client"
-import { AlertCircle, Mail, CheckCircle, Send, Info } from "lucide-react"
+import { AlertCircle, Mail, CheckCircle, Send, Info, Lock, Eye, EyeOff } from "lucide-react"
+import { firebaseAuth, firestore, actionCodeSettings } from "@/lib/firebase"
+import { sendSignInLinkToEmail, sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth"
+import { collection, query, where, getDocs } from "firebase/firestore"
 
 interface LoginFormProps {
-  onLoginSuccess: (usuario: Usuario) => void
+  onLoginSuccess: (usuario: any) => void
 }
 
 export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
@@ -22,17 +24,12 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
   const [senha, setSenha] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [showExpiredModal, setShowExpiredModal] = useState(false)
-  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false)
-  const [showEmailSentModal, setShowEmailSentModal] = useState(false)
-  const [currentUser, setCurrentUser] = useState<Usuario | null>(null)
-  const [resetLink, setResetLink] = useState("")
-  const [emailSendResult, setEmailSendResult] = useState<{
-    success: boolean
-    error?: string
-    simulated?: boolean
-    fallback?: boolean
-  } | null>(null)
+  const [success, setSuccess] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const [resetEmailSent, setResetEmailSent] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [loginMethod, setLoginMethod] = useState<'password' | 'link'>('password')
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -40,325 +37,113 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
       alert("Link copiado para a área de transferência!")
     } catch (err) {
       console.error("Erro ao copiar:", err)
-      // Fallback para navegadores mais antigos
-      const textArea = document.createElement("textarea")
-      textArea.value = text
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand("copy")
-      document.body.removeChild(textArea)
-      alert("Link copiado!")
     }
   }
 
-  const handleSendResetEmail = async (usuario: Usuario) => {
-    try {
-      console.log("🔄 === FORÇANDO SALVAMENTO DE TOKEN ===")
-      console.log("👤 Usuário:", usuario.email, "ID:", usuario.id)
-
-      // Gerar token muito simples
-      const timestamp = Date.now().toString()
-      const resetToken = `reset_${timestamp}`
-      const expiresAt = new Date()
-      expiresAt.setHours(expiresAt.getHours() + 24)
-
-      console.log("🔑 Token super simples:", resetToken)
-      console.log("🔑 Tamanho:", resetToken.length)
-
-      // MÉTODO 1: Update usando email ao invés de ID
-      console.log("💾 MÉTODO 1: Update por email...")
-      const { data: method1, error: error1 } = await supabase
-        .from("usuarios")
-        .update({
-          reset_token: resetToken,
-          reset_token_expires: expiresAt.toISOString(),
-        })
-        .eq("email", usuario.email)
-        .select("reset_token, reset_token_expires")
-
-      console.log("📊 Resultado método 1:", { data: method1, error: error1?.message })
-
-      if (!error1 && method1 && method1.length > 0) {
-        console.log("✅ Método 1 funcionou!")
-
-        // Verificar se realmente salvou
-        const { data: verify1, error: verifyError1 } = await supabase
-          .from("usuarios")
-          .select("reset_token, reset_token_expires")
-          .eq("email", usuario.email)
-          .single()
-
-        if (verify1?.reset_token === resetToken) {
-          console.log("✅ Token confirmado pelo método 1")
-
-          // Gerar link e enviar email
-          const resetLink = `${window.location.origin}/alterar-senha?token=${resetToken}`
-          const emailResult = await sendEmailClient({
-            type: "password-reset",
-            to: usuario.email,
-            nome: usuario.nome,
-            resetLink: resetLink,
-          })
-
-          return {
-            success: emailResult.success,
-            link: resetLink,
-            error: emailResult.error,
-            simulated: emailResult.simulated,
-            fallback: emailResult.fallback,
-          }
-        }
-      }
-
-      // MÉTODO 2: Update usando RPC (função do banco)
-      console.log("💾 MÉTODO 2: Tentando RPC...")
-      try {
-        const { data: method2, error: error2 } = await supabase.rpc("update_reset_token", {
-          user_email: usuario.email,
-          new_token: resetToken,
-          expires_at: expiresAt.toISOString(),
-        })
-
-        console.log("📊 Resultado método 2 (RPC):", { data: method2, error: error2?.message })
-
-        if (!error2) {
-          // Verificar se RPC funcionou
-          const { data: verify2, error: verifyError2 } = await supabase
-            .from("usuarios")
-            .select("reset_token")
-            .eq("email", usuario.email)
-            .single()
-
-          if (verify2?.reset_token === resetToken) {
-            console.log("✅ RPC funcionou!")
-
-            const resetLink = `${window.location.origin}/alterar-senha?token=${resetToken}`
-            const emailResult = await sendEmailClient({
-              type: "password-reset",
-              to: usuario.email,
-              nome: usuario.nome,
-              resetLink: resetLink,
-            })
-
-            return {
-              success: emailResult.success,
-              link: resetLink,
-              error: emailResult.error,
-              simulated: emailResult.simulated,
-              fallback: emailResult.fallback,
-            }
-          }
-        }
-      } catch (rpcError) {
-        console.log("⚠️ RPC não disponível:", rpcError)
-      }
-
-      // MÉTODO 3: Update com upsert
-      console.log("💾 MÉTODO 3: Tentando upsert...")
-      const { data: method3, error: error3 } = await supabase
-        .from("usuarios")
-        .upsert(
-          {
-            email: usuario.email,
-            nome: usuario.nome,
-            senha: usuario.senha,
-            chave_de_acesso: usuario.chave_de_acesso,
-            reset_token: resetToken,
-            reset_token_expires: expiresAt.toISOString(),
-            primeiro_login: usuario.primeiro_login,
-          },
-          {
-            onConflict: "email",
-            ignoreDuplicates: false,
-          },
-        )
-        .select("reset_token")
-
-      console.log("📊 Resultado método 3 (upsert):", { data: method3, error: error3?.message })
-
-      if (!error3 && method3 && method3.length > 0) {
-        const { data: verify3, error: verifyError3 } = await supabase
-          .from("usuarios")
-          .select("reset_token")
-          .eq("email", usuario.email)
-          .single()
-
-        if (verify3?.reset_token === resetToken) {
-          console.log("✅ Upsert funcionou!")
-
-          const resetLink = `${window.location.origin}/alterar-senha?token=${resetToken}`
-          const emailResult = await sendEmailClient({
-            type: "password-reset",
-            to: usuario.email,
-            nome: usuario.nome,
-            resetLink: resetLink,
-          })
-
-          return {
-            success: emailResult.success,
-            link: resetLink,
-            error: emailResult.error,
-            simulated: emailResult.simulated,
-            fallback: emailResult.fallback,
-          }
-        }
-      }
-
-      // MÉTODO 4: Múltiplos updates pequenos
-      console.log("💾 MÉTODO 4: Updates separados...")
-
-      // Primeiro limpar
-      const { error: clearError } = await supabase
-        .from("usuarios")
-        .update({ reset_token: null, reset_token_expires: null })
-        .eq("email", usuario.email)
-
-      console.log("🧹 Limpeza:", clearError?.message || "OK")
-
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // Depois salvar só o token
-      const { error: tokenError } = await supabase
-        .from("usuarios")
-        .update({ reset_token: resetToken })
-        .eq("email", usuario.email)
-
-      console.log("🔑 Salvamento token:", tokenError?.message || "OK")
-
-      await new Promise((resolve) => setTimeout(resolve, 500))
-
-      // Depois salvar a data
-      const { error: dateError } = await supabase
-        .from("usuarios")
-        .update({ reset_token_expires: expiresAt.toISOString() })
-        .eq("email", usuario.email)
-
-      console.log("📅 Salvamento data:", dateError?.message || "OK")
-
-      // Verificar resultado final
-      const { data: finalCheck, error: finalError } = await supabase
-        .from("usuarios")
-        .select("reset_token, reset_token_expires")
-        .eq("email", usuario.email)
-        .single()
-
-      console.log("📊 Verificação final:", {
-        token: finalCheck?.reset_token,
-        expires: finalCheck?.reset_token_expires,
-        error: finalError?.message,
-      })
-
-      if (finalCheck?.reset_token === resetToken) {
-        console.log("✅ Método 4 funcionou!")
-
-        const resetLink = `${window.location.origin}/alterar-senha?token=${resetToken}`
-        const emailResult = await sendEmailClient({
-          type: "password-reset",
-          to: usuario.email,
-          nome: usuario.nome,
-          resetLink: resetLink,
-        })
-
-        return {
-          success: emailResult.success,
-          link: resetLink,
-          error: emailResult.error,
-          simulated: emailResult.simulated,
-          fallback: emailResult.fallback,
-        }
-      }
-
-      // Se chegou aqui, nenhum método funcionou
-      console.error("❌ TODOS OS MÉTODOS FALHARAM")
-      return {
-        success: false,
-        link: "",
-        error: "Impossível salvar token no banco - todos os métodos falharam",
-      }
-    } catch (error) {
-      console.error("❌ Erro geral:", error)
-      return {
-        success: false,
-        link: "",
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-      }
-    }
-  }
-
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLoginWithPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError("")
 
     try {
-      if (!supabase) {
-        setError("Erro de configuração do sistema.")
+      console.log("🔐 Iniciando login com senha...")
+      console.log("📧 Email:", email)
+      console.log("🔑 Senha fornecida:", senha ? "***" + senha.slice(-3) : "vazia")
+
+      // Verificar se o usuário existe no Firestore
+      const usuariosRef = collection(firestore, "usuarios")
+      const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+
+      if (querySnapshot.empty) {
+        setError("Email não encontrado no sistema.")
         setLoading(false)
         return
       }
 
-      console.log("🔐 Tentando login com:", email)
-
-      // Buscar usuário no banco
-      const { data: usuario, error: dbError } = await supabase
-        .from("usuarios")
-        .select("*")
-        .eq("email", email.trim().toLowerCase())
-        .single()
-
-      if (dbError || !usuario) {
-        console.error("❌ Usuário não encontrado:", dbError)
-        setError("Email ou senha incorretos")
-        setLoading(false)
-        return
-      }
-
-      console.log("✅ Usuário encontrado:", {
-        nome: usuario.nome,
-        email: usuario.email,
-        primeiro_login: usuario.primeiro_login,
-      })
-
-      // Verificar senha
-      let senhaValida = false
-
-      if (isBcryptHash(usuario.senha)) {
-        senhaValida = await comparePassword(senha, usuario.senha)
-      } else {
-        senhaValida = usuario.senha.trim() === senha.trim()
-      }
-
-      if (!senhaValida) {
-        console.error("❌ Senha incorreta")
-        setError("Email ou senha incorretos")
-        setLoading(false)
-        return
-      }
+      const usuarioDoc = querySnapshot.docs[0]
+      const usuario = usuarioDoc.data()
 
       // Verificar se a chave de acesso não expirou
       const dataAtual = new Date()
       const chaveAcesso = new Date(usuario.chave_de_acesso)
-
       if (chaveAcesso < dataAtual) {
-        console.error("❌ Chave de acesso expirada")
-        setShowExpiredModal(true)
+        setError("Chave de acesso expirada. Entre em contato com o administrador.")
         setLoading(false)
         return
       }
 
-      // Verificar se é primeiro login
-      if (usuario.primeiro_login) {
-        console.log("🆕 Primeiro login detectado")
-        setCurrentUser(usuario)
-        setShowFirstLoginModal(true)
-        setLoading(false)
+      // Tentar autenticar com Firebase Auth primeiro
+      try {
+        console.log("🔐 Tentando autenticação no Firebase Auth...")
+        await signInWithEmailAndPassword(firebaseAuth, email, senha)
+        console.log("✅ Login com Firebase Auth bem-sucedido!")
+        
+        // Se o Firebase Auth funcionou, verificar se é primeiro login
+        if (usuario.primeiro_login) {
+          console.log("🆕 Primeiro login detectado - redirecionando para alterar senha")
+          window.location.href = `/alterar-senha?primeiro_login=true&email=${encodeURIComponent(email)}`
+          return
+        }
+
+        // Login bem-sucedido - não verificar Firestore se Firebase Auth funcionou
+        console.log("✅ Login bem-sucedido via Firebase Auth")
+        onLoginSuccess(usuario)
         return
+      } catch (authError: any) {
+        console.error("❌ Erro na autenticação Firebase Auth:", authError)
+        
+        // Se o usuário não existe no Firebase Auth, tentar verificar senha no Firestore
+        if (authError.code === "auth/user-not-found") {
+          console.log("👤 Usuário não encontrado no Firebase Auth, tentando Firestore...")
+          
+          // Verificar se há senha no Firestore (fallback para usuários antigos)
+          if (usuario.senha) {
+            let senhaValida = false
+            
+            if (isBcryptHash(usuario.senha)) {
+              console.log("🔐 Verificando senha criptografada no Firestore...")
+              console.log("🔐 Hash armazenado:", usuario.senha.substring(0, 20) + "...")
+              senhaValida = await comparePassword(senha, usuario.senha)
+              console.log("🔐 Resultado da comparação bcrypt:", senhaValida)
+            } else {
+              console.log("🔐 Verificando senha em texto no Firestore...")
+              console.log("🔐 Senha armazenada:", usuario.senha)
+              senhaValida = usuario.senha.trim() === senha.trim()
+              console.log("🔐 Resultado da comparação texto:", senhaValida)
+            }
+
+            if (senhaValida) {
+              console.log("✅ Login com senha do Firestore bem-sucedido!")
+              
+              // Verificar se é primeiro login
+              if (usuario.primeiro_login) {
+                console.log("🆕 Primeiro login detectado - redirecionando para alterar senha")
+                window.location.href = `/alterar-senha?primeiro_login=true&email=${encodeURIComponent(email)}`
+                return
+              }
+
+              // Login bem-sucedido
+              onLoginSuccess(usuario)
+              return
+            } else {
+              console.log("❌ Senha incorreta no Firestore")
+            }
+          } else {
+            console.log("❌ Nenhuma senha encontrada no Firestore")
+          }
+          
+          setError("Email ou senha incorretos")
+        } else if (authError.code === "auth/wrong-password") {
+          console.log("❌ Senha incorreta no Firebase Auth")
+          setError("Email ou senha incorretos")
+        } else {
+          console.log("❌ Outro erro de autenticação:", authError.code)
+          setError("Suas credenciais estão incorretas. Tente novamente.")
+        }
       }
 
-      // Login bem-sucedido
-      console.log("✅ Login realizado com sucesso!")
-      onLoginSuccess(usuario)
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Erro no login:", err)
       setError("Erro interno do servidor")
     } finally {
@@ -366,22 +151,100 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
     }
   }
 
-  const handleFirstLoginConfirm = async () => {
-    if (!currentUser) return
-
+  const handleSendLoginLink = async (e: React.FormEvent) => {
+    e.preventDefault()
     setLoading(true)
-    const result = await handleSendResetEmail(currentUser)
+    setError("")
 
-    setEmailSendResult(result)
-    setResetLink(result.link)
-    setShowFirstLoginModal(false)
-    setShowEmailSentModal(true)
+    try {
+      console.log("🔐 Iniciando envio de link de login...")
+      console.log("📧 Email:", email)
 
-    if (!result.success) {
-      setError(result.error || "Erro ao enviar email")
+      // Verificar se o usuário existe no Firestore
+      const usuariosRef = collection(firestore, "usuarios")
+      const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+
+      if (querySnapshot.empty) {
+        setError("Email não encontrado no sistema.")
+        setLoading(false)
+        return
+      }
+
+      const usuarioDoc = querySnapshot.docs[0]
+      const usuario = usuarioDoc.data()
+
+      // Verificar se a chave de acesso não expirou
+      const dataAtual = new Date()
+      const chaveAcesso = new Date(usuario.chave_de_acesso)
+      if (chaveAcesso < dataAtual) {
+        setError("Chave de acesso expirada. Entre em contato com o administrador.")
+        setLoading(false)
+        return
+      }
+
+      // Enviar link de autenticação
+      await sendSignInLinkToEmail(firebaseAuth, email, actionCodeSettings)
+
+      // Salvar email no localStorage
+      window.localStorage.setItem('emailForSignIn', email)
+
+      console.log("✅ Link de login enviado com sucesso!")
+      setSuccess(true)
+      setEmailSent(true)
+
+    } catch (err: any) {
+      console.error("❌ Erro ao enviar link:", err)
+      if (err.code === "auth/invalid-email") {
+        setError("Email inválido.")
+      } else if (err.code === "auth/user-not-found") {
+        setError("Email não encontrado no sistema.")
+      } else {
+        setError("Erro ao enviar link de login. Tente novamente.")
+      }
+    } finally {
+      setLoading(false)
     }
+  }
 
-    setLoading(false)
+  const handleSendResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError("")
+
+    try {
+      console.log("🔐 Iniciando envio de email de redefinição de senha...")
+      console.log("📧 Email:", email)
+
+      // Verificar se o usuário existe no Firestore
+      const usuariosRef = collection(firestore, "usuarios")
+      const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+
+      if (querySnapshot.empty) {
+        setError("Email não encontrado no sistema.")
+        setLoading(false)
+        return
+      }
+
+      // Enviar email de redefinição de senha
+      await sendPasswordResetEmail(firebaseAuth, email)
+
+      console.log("✅ Email de redefinição enviado com sucesso!")
+      setResetEmailSent(true)
+
+    } catch (err: any) {
+      console.error("❌ Erro ao enviar email de reset:", err)
+      if (err.code === "auth/invalid-email") {
+        setError("Email inválido.")
+      } else if (err.code === "auth/user-not-found") {
+        setError("Email não encontrado no sistema.")
+      } else {
+        setError("Erro ao enviar email de redefinição. Tente novamente.")
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -398,184 +261,266 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
               />
             </div>
             <h1 className="text-2xl font-bold" style={{ color: "#06459a" }}>
-              Login
+              {showResetPassword ? "Redefinir Senha" : "Login"}
             </h1>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="Digite seu email"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="senha">Senha</Label>
-                <Input
-                  id="senha"
-                  type="password"
-                  value={senha}
-                  onChange={(e) => setSenha(e.target.value)}
-                  required
-                  placeholder="Sua senha"
-                />
-              </div>
-              {error && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-                style={{ backgroundColor: "#06459a", color: "#ffffff" }}
-              >
-                {loading ? "Entrando..." : "Entrar"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+            {!emailSent && !resetEmailSent ? (
+              <>
+                {!showResetPassword && (
+                  <div className="mb-4">
+                    <div className="flex bg-gray-100 rounded-lg p-1">
+                      <button
+                        type="button"
+                        onClick={() => setLoginMethod('password')}
+                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                          loginMethod === 'password'
+                            ? 'bg-white text-blue-600 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        Senha
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLoginMethod('link')}
+                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                          loginMethod === 'link'
+                            ? 'bg-white text-blue-600 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        Link de Login
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-      {/* Modal de primeiro login */}
-      {showFirstLoginModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-md mx-4">
-            <div className="text-center">
-              <Mail className="h-12 w-12 mx-auto mb-4" style={{ color: "#06459a" }} />
-              <h2 className="text-xl font-bold mb-2" style={{ color: "#06459a" }}>
-                🆕 Primeiro Acesso
-              </h2>
-              <p className="text-gray-600 mb-4">
-                Este é seu primeiro login. Precisamos que você altere sua senha para continuar.
-              </p>
-              <p className="text-sm text-gray-500 mb-4">
-                Enviaremos um link seguro para <strong>{currentUser?.email}</strong> para que você possa definir sua
-                nova senha.
-              </p>
-              <div className="flex gap-2">
-                <Button onClick={() => setShowFirstLoginModal(false)} variant="outline" className="flex-1">
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleFirstLoginConfirm}
-                  disabled={loading}
-                  className="flex-1"
-                  style={{ backgroundColor: "#06459a", color: "#ffffff" }}
-                >
-                  {loading ? (
-                    <>
-                      <Send className="h-4 w-4 mr-2 animate-spin" />
-                      Enviando...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4 mr-2" />
-                      Enviar Email
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                <p className="text-sm text-gray-600 mb-4 text-center">
+                  {showResetPassword 
+                    ? "Digite seu email para receber um link de redefinição de senha"
+                    : loginMethod === 'password'
+                    ? "Digite seu email e senha para fazer login"
+                    : "Digite seu email para receber um link de login seguro"
+                  }
+                </p>
 
-      {/* Modal de email enviado */}
-      {showEmailSentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-lg mx-4">
-            <div className="text-center">
-              {emailSendResult?.success ? (
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-              ) : (
-                <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              )}
+                <form onSubmit={
+                  showResetPassword 
+                    ? handleSendResetPassword 
+                    : loginMethod === 'password' 
+                    ? handleLoginWithPassword 
+                    : handleSendLoginLink
+                } className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      placeholder="Digite seu email"
+                    />
+                  </div>
 
-              <h2 className="text-xl font-bold mb-2" style={{ color: "#06459a" }}>
-                {emailSendResult?.success ? "✅ Email Enviado!" : "❌ Erro no Envio"}
-              </h2>
-
-              {emailSendResult?.success ? (
-                <>
-                  <p className="text-gray-600 mb-4">
-                    {emailSendResult.simulated ? (
-                      <>
-                        <strong>⚠️ Modo Desenvolvimento:</strong> Email simulado enviado para{" "}
-                        <strong>{currentUser?.email}</strong>. Verifique o console do navegador para ver o link.
-                      </>
-                    ) : (
-                      <>
-                        Enviamos um link seguro para <strong>{currentUser?.email}</strong>.
-                        <br />
-                        <br />
-                        <strong>📧 Verifique sua caixa de entrada e pasta de spam.</strong>
-                        <br />
-                        <br />
-                        Clique no link do email para alterar sua senha.
-                      </>
-                    )}
-                  </p>
-
-                  {emailSendResult.fallback && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                      <div className="flex items-center gap-2 text-blue-800 text-sm">
-                        <Info className="h-4 w-4" />
-                        <span>Email enviado via domínio padrão do Resend</span>
+                  {loginMethod === 'password' && !showResetPassword && (
+                    <div className="space-y-2">
+                      <Label htmlFor="senha">Senha</Label>
+                      <div className="relative">
+                        <Input
+                          id="senha"
+                          type={showPassword ? "text" : "password"}
+                          value={senha}
+                          onChange={(e) => setSenha(e.target.value)}
+                          required
+                          placeholder="Digite sua senha"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
                       </div>
                     </div>
                   )}
-                </>
-              ) : (
-                <div className="text-red-600 mb-4">
-                  <p>Não foi possível enviar o email.</p>
-                  {emailSendResult?.error && <p className="text-sm mt-2">Erro: {emailSendResult.error}</p>}
+
+                  {error && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full"
+                    style={{ backgroundColor: "#06459a", color: "#ffffff" }}
+                  >
+                    {loading ? (
+                      <>
+                        <Send className="h-4 w-4 mr-2 animate-spin" />
+                        {showResetPassword ? "Enviando..." : "Entrando..."}
+                      </>
+                    ) : (
+                      <>
+                        {showResetPassword ? (
+                          <>
+                            <Lock className="h-4 w-4 mr-2" />
+                            Enviar Link de Redefinição
+                          </>
+                        ) : loginMethod === 'password' ? (
+                          <>
+                            <Lock className="h-4 w-4 mr-2" />
+                            Entrar
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="h-4 w-4 mr-2" />
+                            Enviar Link de Login
+                          </>
+                        )}
+                      </>
+                    )}
+                  </Button>
+
+                  {!showResetPassword && loginMethod === 'password' && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPassword(true)}
+                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                      >
+                        Esqueci minha senha
+                      </button>
+                    </div>
+                  )}
+
+                  {!showResetPassword && loginMethod === 'link' && (
+                    <div className="text-center space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPassword(true)}
+                        className="text-sm text-blue-600 hover:text-blue-800 underline block"
+                      >
+                        Esqueci minha senha
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLoginMethod('password')}
+                        className="text-sm text-gray-600 hover:text-gray-800 underline block"
+                      >
+                        Prefiro usar senha
+                      </button>
+                    </div>
+                  )}
+
+                  {showResetPassword && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowResetPassword(false)
+                          setError("")
+                        }}
+                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                      >
+                        Voltar ao login
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </>
+            ) : emailSent ? (
+              <div className="text-center">
+                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
+                <h2 className="text-xl font-bold mb-2" style={{ color: "#06459a" }}>
+                  ✅ Link Enviado!
+                </h2>
+                <p className="text-gray-600 mb-4">
+                  Enviamos um link de login seguro para <strong>{email}</strong>.
+                  <br />
+                  <br />
+                  <strong>📧 Verifique sua caixa de entrada e pasta de spam.</strong>
+                  <br />
+                  <br />
+                  Clique no link do email para fazer login.
+                </p>
+                <div className="space-y-3">
+                  <Button
+                    onClick={() => {
+                      setEmailSent(false)
+                      setSuccess(false)
+                      setError("")
+                    }}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Enviar Novo Link
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setEmailSent(false)
+                      setSuccess(false)
+                      setError("")
+                      setEmail("")
+                    }}
+                    style={{ backgroundColor: "#06459a", color: "#ffffff" }}
+                    className="w-full"
+                  >
+                    Voltar ao Login
+                  </Button>
                 </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => setShowEmailSentModal(false)}
-                  className="flex-1"
-                  style={{ backgroundColor: "#06459a", color: "#ffffff" }}
-                >
-                  {emailSendResult?.success ? "Entendi" : "Tentar Novamente"}
-                </Button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de chave expirada */}
-      {showExpiredModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-md mx-4">
-            <div className="text-center">
-              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold mb-2" style={{ color: "#06459a" }}>
-                ⏰ Chave de Acesso Expirada
-              </h2>
-              <p className="text-gray-600 mb-4">
-                A sua chave de acesso expirou, favor entrar em contato com o suporte do desenvolvimento da Ownl Tech.
-              </p>
-              <Button
-                onClick={() => setShowExpiredModal(false)}
-                style={{ backgroundColor: "#06459a", color: "#ffffff" }}
-              >
-                Fechar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            ) : (
+              <div className="text-center">
+                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
+                <h2 className="text-xl font-bold mb-2" style={{ color: "#06459a" }}>
+                  ✅ Email de Redefinição Enviado!
+                </h2>
+                <p className="text-gray-600 mb-4">
+                  Enviamos um link de redefinição de senha para <strong>{email}</strong>.
+                  <br />
+                  <br />
+                  <strong>📧 Verifique sua caixa de entrada e pasta de spam.</strong>
+                  <br />
+                  <br />
+                  Clique no link do email para redefinir sua senha.
+                </p>
+                <div className="space-y-3">
+                  <Button
+                    onClick={() => {
+                      setResetEmailSent(false)
+                      setError("")
+                    }}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Enviar Novo Email
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setResetEmailSent(false)
+                      setShowResetPassword(false)
+                      setError("")
+                      setEmail("")
+                    }}
+                    style={{ backgroundColor: "#06459a", color: "#ffffff" }}
+                    className="w-full"
+                  >
+                    Voltar ao Login
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </>
   )
 }
