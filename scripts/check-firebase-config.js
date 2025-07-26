@@ -15,7 +15,7 @@ async function checkFirebaseConfig() {
   try {
     console.log("🔍 === VERIFICANDO CONFIGURAÇÃO DO FIREBASE ===");
     
-    // 1. Verificar configuração
+    // 1. Verificar configuração do firebase
     console.log("\n1️⃣ Configuração do Firebase:");
     console.log("📧 Auth Domain:", firebaseConfig.authDomain);
     console.log("🔑 Project ID:", firebaseConfig.projectId);
