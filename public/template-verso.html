@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Verso do Certificado</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f0f0f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: 'Montserrat', 'Times New Roman', serif;
+      color: #1A1A38;
+    }
+
+    .certificate-container {
+      position: relative;
+      width: 950px;
+      height: 670px;
+      background-color: #fff;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .inner-border {
+      position: absolute;
+      top: 3%;
+      bottom: 1cm;
+      left: 3%;
+      right: 3%;
+      border: 5px solid transparent;
+      border-image: linear-gradient(to right, #eac773, #e8c876, #e8c875) 1;
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+
+    .corner {
+      position: absolute;
+      width: 150px;
+      height: 150px;
+      background-color: #0B1947;
+      z-index: 1;
+    }
+
+    .corner-left {
+      top: 0;
+      left: 0;
+      clip-path: polygon(0 0, 100% 0, 0 100%);
+    }
+
+    .corner-right {
+      top: 0;
+      right: 0;
+      clip-path: polygon(100% 0, 0 0, 100% 100%);
+    }
+
+    .bottom-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 50px;
+      background-color: #0B1947;
+      z-index: 1;
+    }
+
+    .content-area {
+      position: relative;
+      z-index: 2;
+      padding: 20px 40px 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    h2, h3 {
+      margin: 10px 0;
+      color: #0B1947;
+    }
+
+    .info {
+      font-size: 14.5px;
+      margin-top: 15px;
+      text-align: justify;
+      line-height: 1.5;
+      padding: 0 10px;
+    }
+
+    .signature-line {
+      border: none;
+      border-top: 2px solid #B79F4C;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .signature-blocks {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      margin-top: 60px;
+      padding: 0 20px;
+    }
+
+    .signature {
+      width: 40%;
+      text-align: center;
+    }
+
+    .signature p {
+      margin-top: 5px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="certificate-container">
+    <div class="inner-border"></div>
+    <div class="corner corner-left"></div>
+    <div class="corner corner-right"></div>
+
+    <div class="content-area">
+      <h3 style="font-size: 18px; margin-bottom: 10px; margin-top: 40px; font-weight: normal;">
+        PROGRAMA E CARGA HORÁRIA DO TREINAMENTO
+      </h3>
+
+      <h2 style="font-size: 18px;">
+        <strong id="treinamento"></strong>
+      </h2>
+
+      <p style="font-size: 15px; margin-top: 5px;">
+        <span id="dataConclusao"></span>. <span id="cargaHoraria"></span>
+      </p>
+
+      <h3 style="text-align: left; width: 100%; font-size: 16px; margin-top: 40px; font-weight: normal">
+        CONTEÚDO PROGRAMÁTICO TEÓRICO E PRÁTICO:
+      </h3>
+
+      <p class="info">
+        Estudo das normas regulamentadoras: NR 05 – Segurança e Saúde Ocupacional na Mineração e NR 22 Comissão Interna de Prevenção de Acidentes e de Assédio – CIPA; Estrutura da CIPAMIN; Organização da CIPAMIN e atribuições; Gerenciamento dos riscos; Estudo do Ambiente e condições de trabalho; Os principais riscos de acidente e doenças do trabalho na mineração; Elaboração do mapa de risco; Inspeções de segurança, aspectos teóricos e práticos da inspeção de campo; Metodologia de investigação e análise de acidentes (ferramenta ADC – árvore de causas e outras); Estudo de caso prático de investigação de acidente; Equipamento de proteção individual; EPR e PPR equipamentos e programa de proteção respiratória conforme IN-01; Princípios básicos de prevenção e combate a incêndios; PPP e a mineração; Saúde no trabalho; Doenças do trabalho e suas prevenção; Primeiros socorros.
+      </p>
+
+      <div class="signature-blocks">
+        <div class="signature">
+          <hr class="signature-line" />
+          <p>Empregado</p>
+        </div>
+        <div class="signature">
+          <hr class="signature-line" />
+          <p>Responsável Técnico<br>CBA - Companhia Brasileira de Alumínio.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-bar"></div>
+  </div>
+</body>
+</html> 

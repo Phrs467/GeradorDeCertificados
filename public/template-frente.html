@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Certificado de Conclusão</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #f0f0f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: 'Montserrat', 'Times New Roman', serif;
+      color: #1A1A38;
+    }
+
+    .certificate-container {
+      position: relative;
+      width: 950px;
+      height: 670px;
+      background-color: #fff;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+ .inner-border {
+  position: absolute;
+  top: 3%;
+  bottom: 1cm;
+  left: 3%;
+  right: 3%;
+  border: 5px solid transparent; /* precisa ser transparente para mostrar o degradê */
+  border-image: linear-gradient(to right, #eac773, #e8c876, #e8c875) 1;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+
+    .corner {
+      position: absolute;
+      width: 150px;
+      height: 150px;
+      background-color: #0B1947;
+      z-index: 1;
+    }
+
+    .corner-left {
+      top: 0;
+      left: 0;
+      clip-path: polygon(0 0, 100% 0, 0 100%);
+    }
+
+    .corner-right {
+      top: 0;
+      right: 0;
+      clip-path: polygon(100% 0, 0 0, 100% 100%);
+    }
+
+    .bottom-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 50px;
+      background-color: #0B1947;
+      z-index: 1;
+    }
+
+    .content-area {
+      position: relative;
+      z-index: 2;
+      padding: 20px 40px 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .logo-container {
+      width: 130px;
+      height: 60px;
+      background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Blue_check.svg/1200px-Blue_check.svg.png');
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      margin: 0 auto 8px;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: bold;
+      margin: 0;
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 20px 0 5px;
+      width: 100%;
+    }
+
+    .title .line {
+      width: 90px;
+      height: 5px;
+      background-color: #B79F4C;
+      margin: 0 10px;
+      flex-grow: 0;
+      flex-shrink: 0;
+    }
+
+    .title h2 {
+      font-size: 44px;
+      font-weight: bold;
+      margin: 0;
+      color: #0B1947;
+    }
+
+    h3 {
+      margin: 0 0 25px;
+      font-size: 22px;
+      font-weight: 400;
+      color: #0B1947;
+    }
+
+    .certify, .doc, .intro, .training, .info, .date {
+      font-size: 16px;
+      margin: 8px 0;
+    }
+
+    .training {
+      font-weight: bold;
+    }
+
+    .info {
+      padding: 0 30px;
+    }
+
+    .date {
+      margin-top: 30px;
+    }
+
+    .signature-line {
+      border: none;
+      border-top: 2px solid #B79F4C;
+      width: 50%;
+      margin: 40px auto 10px;
+    }
+
+   .footer {
+  position: relative;
+  width: 100%;
+  height: 60px;
+  font-size: 12px;
+  margin-top: auto;
+}
+
+    .footer-left{
+      position: absolute;
+      top: 70px;
+    }
+    .footer-right{
+      position: absolute;
+      top: 70px;
+    }
+    .footer-center {
+      position: absolute;
+      top: 0;
+    }
+
+    .footer-left {
+      left: 0;
+      text-align: left;
+      padding-left: 20px;
+    }
+
+    .footer-right {
+      right: 0;
+      text-align: right;
+      padding-right: 20px;
+    }
+
+    .footer-center {
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+    }
+
+    .footer p {
+      margin: 2px 0;
+    }
+
+    .qr-code-container {
+      position: absolute;
+      bottom: 100px;
+      margin-right: 40px;
+      right: 20px;
+      z-index: 3;
+      text-align: center;
+    }
+
+    .qr-code {
+      width: 80px;
+      height: 80px;
+      display: none;
+      border: 2px solid #0B1947;
+      border-radius: 4px;
+    }
+
+    .qr-code-text {
+      font-size: 8px;
+      color: #0B1947;
+      margin-top: 2px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="certificate-container">
+    <div class="inner-border"></div>
+    <div class="corner corner-left"></div>
+    <div class="corner corner-right"></div>
+
+    <div class="content-area">
+      <header>
+        <div class="logo-container"></div>
+        <h1>INSPEÇÃO, SEGURANÇA E PREVENÇÃO</h1>
+      </header>
+
+      <div class="title">
+        <div class="line"></div>
+        <h2>CERTIFICADO</h2>
+        <div class="line"></div>
+      </div>
+      <h3>DE CONCLUSÃO</h3>
+
+      <p class="certify">Certificamos que: <span style="font-weight: bold" id="aluno"></span></p>
+      <p class="doc">Portador(a) do DOC: <span style="font-weight: bold" id="documento"></span></p>
+      <p class="intro">Concluiu com aproveitamento o treinamento de;</p>
+      <p class="training" id="treinamento"></p>
+      <p class="info">
+        Conforme NR 22 – SEGURANÇA E SAÚDE OCUPACIONAL NA MINERAÇÃO E NR 05 – COMISSÃO INTERNA DE PREVENÇÃO DE ACIDENTES E DE ASSÉDIO – CIPA da portaria 3214/78.
+        Realizado na empresa <span style="font-weight: bold" id="empresa"></span> localizada no município de Barro Alto – GO, com carga horária de <span style="font-weight: bold" id="cargaHoraria"></span>.
+      </p>
+
+      <hr class="signature-line">
+
+      <!-- Container para assinaturas -->
+      <div id="assinaturas-container" style="margin-top: 20px; min-height: 100px;">
+        <!-- As assinaturas serão inseridas aqui via JavaScript -->
+      </div>
+
+      <div class="footer">
+        <div class="footer-left">
+          <p id="cnpj">CNPJ: 25.322.790/0001-52</p>
+        </div>
+        <div class="footer-center">
+          <p>Responsável Técnico</p>
+          <p style="font-weight: bold" id="instrutor"></p>
+          <p>MTE: SP/022992-9</p>
+          <p>BPC: 2905209-03</p>
+        </div>
+        <div class="footer-right">
+          <p><strong id="certificado">CERT. N. MERGEFIELD CERT ISP/25/MAR/AR/353</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-bar"></div>
+    
+    <div class="qr-code-container">
+      <img id="qr-code" class="qr-code" alt="QR Code para verificação" />
+    </div>
+  </div>
+</body>
+</html> 
