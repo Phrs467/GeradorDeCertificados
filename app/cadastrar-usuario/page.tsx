@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { onAuthStateChanged } from "firebase/auth"
+import { onAuthStateChanged, signOut } from "firebase/auth"
 import { firebaseAuth, firestore } from "@/lib/firebase"
 import { collection, query, where, getDocs, addDoc } from "firebase/firestore"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { AlertCircle, ArrowLeft, UserPlus, CheckCircle } from "lucide-react"
+import { AlertCircle, UserPlus, CheckCircle } from "lucide-react"
 
 interface Usuario {
   id: string
@@ -167,8 +167,15 @@ export default function CadastrarUsuarioPage() {
     }
   }
 
-  const handleVoltar = () => {
-    router.push('/dashboard')
+  const handleLogout = async () => {
+    try {
+      console.log("🚪 Fazendo logout...")
+      await signOut(firebaseAuth)
+      sessionStorage.removeItem('usuario')
+      router.push('/')
+    } catch (error) {
+      console.error("❌ Erro ao fazer logout:", error)
+    }
   }
 
   if (loading) {
@@ -187,38 +194,66 @@ export default function CadastrarUsuarioPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#06459a" }}>
-      {/* Header */}
-      <header className="shadow-sm border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <img
-                src="/OwlTechLogo.png"
-                alt="Logo OwlTech"
-                className="w-10 h-10 object-contain bg-white rounded-lg"
-                style={{ padding: 2 }}
-              />
-              <h1 className="text-xl font-bold" style={{ color: "#06459a" }}>Owl Tech - Sistema de Certificados</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Olá, {usuario.nome}</span>
-              <Button
-                onClick={handleVoltar}
-                variant="outline"
-                size="sm"
-                style={{ borderColor: "#06459a", color: "#06459a" }}
-              >
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Voltar ao Dashboard
-              </Button>
-            </div>
+    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+      {/* Navbar fixa no topo */}
+      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
+          <div className="flex items-center gap-4">
+            <img src="/OwlTechLogo.png" alt="Logo ISP Certificados" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
+            <span className="font-bold text-white text-lg">ISP CERTIFICADOS</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/dashboard')}
+            >
+              Dashboard
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/alunos')}
+            >
+              Alunos
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/relatorios')}
+            >
+              Relatórios
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition border-b-2 border-white"
+            >
+              Usuários
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/assinaturas')}
+            >
+              Assinaturas
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={handleLogout}
+            >
+              Sair
+            </button>
           </div>
         </div>
-      </header>
+      </nav>
+      <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
       {/* Main Content */}
       <main className="max-w-2xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        {/* Header da página */}
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-2">
+            <UserPlus className="h-8 w-8 text-blue-600" />
+            <h1 className="text-3xl font-bold text-gray-900">Cadastrar Usuário</h1>
+          </div>
+          <p className="text-gray-600">Crie novos usuários no sistema com diferentes níveis de acesso</p>
+        </div>
+
         {success ? (
           <Card className="border-green-200 bg-green-50">
             <CardHeader className="text-center">
@@ -238,7 +273,7 @@ export default function CadastrarUsuarioPage() {
                   Cadastrar Outro Usuário
                 </Button>
                 <Button
-                  onClick={handleVoltar}
+                  onClick={() => router.push('/dashboard')}
                   style={{ backgroundColor: "#06459a", color: "#ffffff" }}
                   className="w-full"
                 >
@@ -248,7 +283,7 @@ export default function CadastrarUsuarioPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card>
+          <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2" style={{ color: "#06459a" }}>
                 <UserPlus className="h-5 w-5" />
@@ -266,6 +301,7 @@ export default function CadastrarUsuarioPage() {
                     onChange={(e) => setNome(e.target.value)}
                     required
                     placeholder="Digite o nome completo"
+                    className="h-10"
                   />
                 </div>
 
@@ -278,13 +314,14 @@ export default function CadastrarUsuarioPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     placeholder="Digite o email"
+                    className="h-10"
                   />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="funcao">Função</Label>
                   <Select value={funcao} onValueChange={setFuncao} required>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-10">
                       <SelectValue placeholder="Selecione a função" />
                     </SelectTrigger>
                     <SelectContent>
@@ -304,7 +341,7 @@ export default function CadastrarUsuarioPage() {
                 <Button
                   type="submit"
                   disabled={submitting}
-                  className="w-full"
+                  className="w-full h-10"
                   style={{ backgroundColor: "#06459a", color: "#ffffff" }}
                 >
                   {submitting ? (
