@@ -30,6 +30,7 @@ export default function CadastrarUsuarioPage() {
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState("")
+  const [loading, setLoading] = useState(true)
   
   // Form data
   const [nome, setNome] = useState("")
@@ -37,28 +38,19 @@ export default function CadastrarUsuarioPage() {
   const [funcao, setFuncao] = useState("")
 
   useEffect(() => {
-    // Verificar autenticação
-    const sessionUser = sessionStorage.getItem('usuario')
-    if (sessionUser) {
-      try {
+    try {
+      // Obter dados do usuário da sessão para exibir na navbar
+      const sessionUser = sessionStorage.getItem('usuario')
+      if (sessionUser) {
         const usuarioData = JSON.parse(sessionUser) as Usuario
-        // Verificar se é administrador
-        if (usuarioData.funcao !== "Administrador") {
-          console.error("❌ Usuário não é administrador")
-          router.push('/dashboard')
-          return
-        }
-        console.log("✅ Administrador autenticado:", usuarioData.nome)
         setUsuario(usuarioData)
-      } catch (error) {
-        console.error("❌ Erro ao parsear dados da sessão:", error)
-        sessionStorage.removeItem('usuario')
-        router.push('/')
       }
-    } else {
-      router.push('/')
+    } catch (error) {
+      console.error("❌ Erro ao obter dados da sessão:", error)
+    } finally {
+      setLoading(false)
     }
-  }, [router])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,40 +72,45 @@ export default function CadastrarUsuarioPage() {
       }
 
       // Verificar se email já existe
-      const db = getFirestore(firebaseApp)
-      const usuariosRef = collection(db, "usuarios")
-      const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
-      const querySnapshot = await getDocs(q)
+      try {
+        const db = getFirestore(firebaseApp as any)
+        const usuariosRef = collection(db, "usuarios")
+        const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
+        const querySnapshot = await getDocs(q)
 
-      if (!querySnapshot.empty) {
-        setError("Email já cadastrado no sistema")
-        return
+        if (!querySnapshot.empty) {
+          setError("Email já cadastrado no sistema")
+          return
+        }
+
+        // Criar data de expiração (1 ano a frente)
+        const dataExpiracao = new Date()
+        dataExpiracao.setFullYear(dataExpiracao.getFullYear() + 1)
+
+        // Criar novo usuário
+        const novoUsuario = {
+          nome: nome.trim(),
+          email: email.toLowerCase().trim(),
+          funcao: funcao,
+          chave_de_acesso: dataExpiracao.toISOString(),
+          primeiro_login: true,
+          senha: null, // Senha será definida no primeiro login
+          data_criacao: new Date().toISOString()
+        }
+
+        await addDoc(usuariosRef, novoUsuario)
+
+        console.log("✅ Usuário criado com sucesso!")
+        setSuccess(true)
+        
+        // Limpar formulário
+        setNome("")
+        setEmail("")
+        setFuncao("")
+      } catch (firebaseError) {
+        console.error("❌ Erro do Firebase:", firebaseError)
+        setError("Erro de conexão com o banco de dados. Verifique sua conexão com a internet.")
       }
-
-      // Criar data de expiração (1 ano a frente)
-      const dataExpiracao = new Date()
-      dataExpiracao.setFullYear(dataExpiracao.getFullYear() + 1)
-
-      // Criar novo usuário
-      const novoUsuario = {
-        nome: nome.trim(),
-        email: email.toLowerCase().trim(),
-        funcao: funcao,
-        chave_de_acesso: dataExpiracao.toISOString(),
-        primeiro_login: true,
-        senha: null, // Senha será definida no primeiro login
-        data_criacao: new Date().toISOString()
-      }
-
-      await addDoc(usuariosRef, novoUsuario)
-
-      console.log("✅ Usuário criado com sucesso!")
-      setSuccess(true)
-      
-      // Limpar formulário
-      setNome("")
-      setEmail("")
-      setFuncao("")
 
     } catch (error) {
       console.error("❌ Erro ao criar usuário:", error)
@@ -133,15 +130,23 @@ export default function CadastrarUsuarioPage() {
     }
   }
 
-  if (!usuario) {
-    return null
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#06459a" }}>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
+          <p className="text-white">Carregando...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <ProtectedRoute requiredRole="Administrador">
       <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
         {/* Usando o componente Navbar */}
-        <Navbar currentPage="usuarios" usuario={usuario} onLogout={handleLogout} />
+        <Navbar currentPage="usuarios" usuario={usuario || undefined} onLogout={handleLogout} />
         <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
         {/* Main Content */}
