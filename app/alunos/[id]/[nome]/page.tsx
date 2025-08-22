@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { doc, getDoc, collection, query, where, getDocs, getFirestore } from "firebase/firestore"
 import { firebaseApp } from "@/lib/firebase"
 import { User, Building, Calendar, Clock, Award, ArrowLeft, Edit, Download } from "lucide-react"
+import ProtectedRoute from "@/components/protected-route"
 
 interface Certificado {
   id: string
@@ -29,6 +30,7 @@ export default function PerfilAluno() {
   const [aluno, setAluno] = useState<Aluno | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [downloadingCertificates, setDownloadingCertificates] = useState<Set<string>>(new Set())
   const router = useRouter()
 
   useEffect(() => {
@@ -89,6 +91,9 @@ export default function PerfilAluno() {
   })
 
   const handleDownloadCertificado = async (certificado: Certificado) => {
+    // Adiciona o certificado ao conjunto de downloads em andamento
+    setDownloadingCertificates(prev => new Set(prev).add(certificado.id))
+    
     try {
       console.log('🔄 Iniciando download do certificado:', certificado.id)
       const response = await fetch(`/api/certificados/download/${certificado.id}`);
@@ -115,11 +120,19 @@ export default function PerfilAluno() {
     } catch (error) {
       console.error("❌ Erro ao baixar certificado:", error);
       alert("Erro ao baixar certificado.");
+    } finally {
+      // Remove o certificado do conjunto de downloads em andamento
+      setDownloadingCertificates(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(certificado.id)
+        return newSet
+      })
     }
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
       {/* Navbar fixa no topo */}
       <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
@@ -144,6 +157,18 @@ export default function PerfilAluno() {
               onClick={() => router.push('/relatorios')}
             >
               Relatórios
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/cadastrar-usuario')}
+            >
+              Usuários
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/assinaturas')}
+            >
+              Assinaturas
             </button>
             <button
               className="text-white hover:text-blue-200 font-medium transition"
@@ -251,10 +276,24 @@ export default function PerfilAluno() {
                           </button>
                           <button
                             onClick={() => handleDownloadCertificado(cert)}
-                            className="flex items-center gap-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition"
+                            disabled={downloadingCertificates.has(cert.id)}
+                            className={`flex items-center gap-1 px-3 py-1 text-sm rounded transition ${
+                              downloadingCertificates.has(cert.id)
+                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                : 'bg-green-600 text-white hover:bg-green-700'
+                            }`}
                           >
-                            <Download className="h-3 w-3" />
-                            Download
+                            {downloadingCertificates.has(cert.id) ? (
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                                Baixando...
+                              </>
+                            ) : (
+                              <>
+                                <Download className="h-3 w-3" />
+                                Download
+                              </>
+                            )}
                           </button>
                         </div>
                       </CardContent>
@@ -267,5 +306,6 @@ export default function PerfilAluno() {
         </div>
       </main>
     </div>
+    </ProtectedRoute>
   )
 } 

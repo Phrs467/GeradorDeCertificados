@@ -8,6 +8,10 @@ export interface PDFData {
 // Função para gerar PDF usando API route (igual ao script original)
 export async function gerarPDFCompleto(frenteHTML: string, versoHTML: string, nomeArquivo: string): Promise<Blob> {
   try {
+    console.log(`🔄 Iniciando geração de PDF para: ${nomeArquivo}`)
+    console.log(`📏 HTML frente: ${frenteHTML.length} caracteres`)
+    console.log(`📏 HTML verso: ${versoHTML.length} caracteres`)
+    
     // Chama a API route para gerar o PDF
     const response = await fetch('/api/gerar-pdf', {
       method: 'POST',
@@ -21,15 +25,28 @@ export async function gerarPDFCompleto(frenteHTML: string, versoHTML: string, no
       })
     })
 
+    console.log(`📡 Resposta da API: ${response.status} ${response.statusText}`)
+
     if (!response.ok) {
-      throw new Error('Erro ao gerar PDF')
+      const errorText = await response.text()
+      console.error(`❌ Erro na API: ${response.status} - ${errorText}`)
+      throw new Error(`Erro na API: ${response.status} - ${errorText}`)
     }
 
     const result = await response.json()
+    console.log(`📄 Resultado da API:`, result)
     
     if (!result.success) {
+      console.error(`❌ API retornou erro:`, result.error)
       throw new Error(result.error || 'Erro ao gerar PDF')
     }
+
+    if (!result.pdfBase64) {
+      console.error(`❌ API não retornou pdfBase64`)
+      throw new Error('API não retornou dados do PDF')
+    }
+
+    console.log(`✅ PDF base64 recebido, tamanho: ${result.pdfBase64.length} caracteres`)
 
     // Converte base64 para blob
     const pdfBytes = atob(result.pdfBase64)
@@ -38,10 +55,13 @@ export async function gerarPDFCompleto(frenteHTML: string, versoHTML: string, no
       pdfArray[i] = pdfBytes.charCodeAt(i)
     }
 
-    return new Blob([pdfArray], { type: 'application/pdf' })
+    const blob = new Blob([pdfArray], { type: 'application/pdf' })
+    console.log(`✅ Blob criado com sucesso, tamanho: ${blob.size} bytes`)
+    
+    return blob
     
   } catch (error) {
-    console.error('Erro ao gerar PDF:', error)
+    console.error(`❌ Erro ao gerar PDF para ${nomeArquivo}:`, error)
     throw error
   }
 }

@@ -5,18 +5,32 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
-import { collection, getDocs, addDoc, deleteDoc, doc, getFirestore } from "firebase/firestore"
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage"
-import { firebaseApp } from "@/lib/firebase"
 import { Search, FileText, Upload, Trash2, Plus, User } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, CheckCircle } from "lucide-react"
+import { 
+  buscarTodasAssinaturas, 
+  cadastrarAssinatura, 
+  excluirAssinatura, 
+  validarArquivoImagem,
+  base64ToDataURL
+} from "@/lib/assinatura-utils"
+import ProtectedRoute from "@/components/protected-route"
+import Navbar from '@/components/navbar'
 
 interface Assinatura {
   id: string
   nome: string
-  urlImagem: string
+  imagemBase64: string
   dataCriacao: Date
+}
+
+interface Usuario {
+  id: string
+  nome: string
+  email: string
+  chave_de_acesso: string
+  funcao?: string
 }
 
 export default function Assinaturas() {
@@ -28,31 +42,35 @@ export default function Assinaturas() {
   const [arquivoImagem, setArquivoImagem] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [mensagem, setMensagem] = useState<{ tipo: 'sucesso' | 'erro', texto: string } | null>(null)
+  const [usuario, setUsuario] = useState<Usuario | null>(null)
   const router = useRouter()
 
   useEffect(() => {
+    // Verificar autenticação
+    const sessionUser = sessionStorage.getItem('usuario')
+    if (sessionUser) {
+      try {
+        const usuarioData = JSON.parse(sessionUser) as Usuario
+        setUsuario(usuarioData)
+      } catch (error) {
+        console.error('❌ Erro ao parsear dados da sessão:', error)
+        sessionStorage.removeItem('usuario')
+        router.push('/')
+        return
+      }
+    } else {
+      router.push('/')
+      return
+    }
+    
     fetchAssinaturas()
-  }, [])
+  }, [router])
 
   async function fetchAssinaturas() {
     setLoading(true)
     try {
-      const db = getFirestore(firebaseApp)
-      const assinaturasRef = collection(db, "assinaturas")
-      const snapshot = await getDocs(assinaturasRef)
-      const assinaturasData: Assinatura[] = []
-      
-      snapshot.forEach(doc => {
-        const data = doc.data()
-        assinaturasData.push({
-          id: doc.id,
-          nome: data.nome,
-          urlImagem: data.urlImagem,
-          dataCriacao: data.dataCriacao?.toDate() || new Date()
-        })
-      })
-      
-      setAssinaturas(assinaturasData.sort((a, b) => b.dataCriacao.getTime() - a.dataCriacao.getTime()))
+      const assinaturasData = await buscarTodasAssinaturas()
+      setAssinaturas(assinaturasData)
     } catch (error) {
       console.error('Erro ao buscar assinaturas:', error)
       setMensagem({ tipo: 'erro', texto: 'Erro ao carregar assinaturas' })
@@ -64,14 +82,10 @@ export default function Assinaturas() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      // Validar se é uma imagem PNG
-      if (!file.type.includes('image/')) {
-        setMensagem({ tipo: 'erro', texto: 'Por favor, selecione apenas arquivos de imagem' })
-        return
-      }
-      
-      if (file.size > 5 * 1024 * 1024) { // 5MB
-        setMensagem({ tipo: 'erro', texto: 'A imagem deve ter menos de 5MB' })
+      // Validar arquivo
+      const validacao = validarArquivoImagem(file)
+      if (!validacao.valido) {
+        setMensagem({ tipo: 'erro', texto: validacao.erro || 'Arquivo inválido' })
         return
       }
 
@@ -99,37 +113,32 @@ export default function Assinaturas() {
     setMensagem(null)
 
     try {
-      const storage = getStorage(firebaseApp)
-      const db = getFirestore(firebaseApp)
+      console.log('🚀 Iniciando cadastro de assinatura...')
+      console.log('📝 Nome:', nomeAssinatura.trim())
+      console.log('📁 Arquivo:', arquivoImagem.name)
+      console.log('📊 Tamanho:', arquivoImagem.size, 'bytes')
       
-      // Upload da imagem para o Firebase Storage
-      const nomeArquivo = `assinaturas/${Date.now()}_${arquivoImagem.name}`
-      const storageRef = ref(storage, nomeArquivo)
-      await uploadBytes(storageRef, arquivoImagem)
+      // Cadastrar assinatura usando Base64
+      const sucesso = await cadastrarAssinatura(nomeAssinatura.trim(), arquivoImagem)
       
-      // Obter URL de download
-      const downloadURL = await getDownloadURL(storageRef)
-      
-      // Salvar dados no Firestore
-      const assinaturaData = {
-        nome: nomeAssinatura.trim(),
-        urlImagem: downloadURL,
-        dataCriacao: new Date()
+      if (sucesso) {
+        console.log('✅ Assinatura cadastrada com sucesso!')
+        
+        // Limpar formulário
+        setNomeAssinatura("")
+        setArquivoImagem(null)
+        setPreviewUrl(null)
+        
+        // Recarregar lista
+        await fetchAssinaturas()
+        
+        setMensagem({ tipo: 'sucesso', texto: 'Assinatura cadastrada com sucesso!' })
+      } else {
+        throw new Error('Falha ao cadastrar assinatura')
       }
       
-      await addDoc(collection(db, "assinaturas"), assinaturaData)
-      
-      // Limpar formulário
-      setNomeAssinatura("")
-      setArquivoImagem(null)
-      setPreviewUrl(null)
-      
-      // Recarregar lista
-      await fetchAssinaturas()
-      
-      setMensagem({ tipo: 'sucesso', texto: 'Assinatura cadastrada com sucesso!' })
     } catch (error) {
-      console.error('Erro ao cadastrar assinatura:', error)
+      console.error('❌ Erro ao cadastrar assinatura:', error)
       setMensagem({ tipo: 'erro', texto: 'Erro ao cadastrar assinatura' })
     } finally {
       setUploading(false)
@@ -142,23 +151,27 @@ export default function Assinaturas() {
     }
 
     try {
-      const db = getFirestore(firebaseApp)
-      const storage = getStorage(firebaseApp)
+      const sucesso = await excluirAssinatura(assinatura.id)
       
-      // Deletar do Firestore
-      await deleteDoc(doc(db, "assinaturas", assinatura.id))
-      
-      // Deletar arquivo do Storage
-      const storageRef = ref(storage, assinatura.urlImagem)
-      await deleteObject(storageRef)
-      
-      // Recarregar lista
-      await fetchAssinaturas()
-      
-      setMensagem({ tipo: 'sucesso', texto: 'Assinatura excluída com sucesso!' })
+      if (sucesso) {
+        // Recarregar lista
+        await fetchAssinaturas()
+        setMensagem({ tipo: 'sucesso', texto: 'Assinatura excluída com sucesso!' })
+      } else {
+        throw new Error('Falha ao excluir assinatura')
+      }
     } catch (error) {
       console.error('Erro ao excluir assinatura:', error)
       setMensagem({ tipo: 'erro', texto: 'Erro ao excluir assinatura' })
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      sessionStorage.removeItem('usuario')
+      router.push('/')
+    } catch (error) {
+      console.error('❌ Erro ao fazer logout:', error)
     }
   }
 
@@ -167,53 +180,10 @@ export default function Assinaturas() {
   )
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Navbar fixa no topo */}
-      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <img src="/OwlTechLogo.png" alt="Logo ISP Certificados" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
-            <span className="font-bold text-white text-lg">ISP CERTIFICADOS</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/alunos')}
-            >
-              Alunos
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/relatorios')}
-            >
-              Relatórios
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/cadastrar-usuario')}
-            >
-              Usuários
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition border-b-2 border-white"
-            >
-              Assinaturas
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/logout')}
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </nav>
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+      {/* Usando o componente Navbar */}
+      <Navbar currentPage="assinaturas" usuario={usuario} onLogout={handleLogout} />
       <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
       {/* Main Content */}
@@ -412,13 +382,13 @@ export default function Assinaturas() {
                   </div>
                   
                   {/* Preview da assinatura */}
-                  <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                    <img 
-                      src={assinatura.urlImagem} 
-                      alt={`Assinatura de ${assinatura.nome}`}
-                      className="max-w-full max-h-20 object-contain mx-auto"
-                    />
-                  </div>
+                                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                      <img 
+                        src={`data:image/png;base64,${assinatura.imagemBase64}`}
+                        alt={`Assinatura de ${assinatura.nome}`}
+                        className="max-w-full max-h-20 object-contain mx-auto"
+                      />
+                    </div>
                   
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
                     <div className="text-xs text-blue-600 font-medium">
@@ -441,5 +411,6 @@ export default function Assinaturas() {
         )}
       </main>
     </div>
+    </ProtectedRoute>
   )
 } 

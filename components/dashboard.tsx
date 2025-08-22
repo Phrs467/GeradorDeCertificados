@@ -10,12 +10,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { processarArquivoExcel, Pessoa, ErroLinha, ResultadoProcessamento, gerarHTMLCertificado, prepararDadosCertificado, sanitizarNome } from '@/lib/certificate-generator'
+import { buscarAssinatura } from '@/lib/assinatura-utils'
 import { gerarPDFCompleto, criarZIPComPDFs, downloadBlob, PDFData } from '@/lib/pdf-generator'
 // Remover: import { adicionarCertificado } from '@/app/api/verificar-certificado/route'
 import ProgressBar from '@/components/progress-bar'
 import { AlertCircle, CheckCircle, XCircle, Upload, FileText, LogOut, Download, FileArchive, UserPlus } from "lucide-react"
 import { useRef } from 'react'
 import QRCode from 'qrcode'
+import Navbar from '@/components/navbar'
 
 // Definir tipo Usuario localmente
 interface Usuario {
@@ -157,7 +159,7 @@ export default function Dashboard({ usuario, onLogout }: DashboardProps) {
       // Inicializa progresso
       setProgresso({ atual: 0, total: pessoas.length, mensagem: 'Carregando templates...' })
       
-      // Carrega os templates em paralelo
+      // CORREÇÃO: Carrega os templates em paralelo, mas lê cada um apenas uma vez
       const [templateFrenteResponse, templateVersoResponse] = await Promise.all([
         fetch('/template-frente.html'),
         fetch('/template-verso.html')
@@ -167,331 +169,421 @@ export default function Dashboard({ usuario, onLogout }: DashboardProps) {
         throw new Error('Erro ao carregar templates')
       }
       
+      // CORREÇÃO: Lê cada template apenas uma vez
       const templateFrente = await templateFrenteResponse.text()
       const templateVerso = await templateVersoResponse.text()
 
-      // Processa certificados em lotes para melhor performance
-      const BATCH_SIZE = 3 // Processa 3 certificados por vez
-      
-      for (let i = 0; i < pessoas.length; i += BATCH_SIZE) {
-        const batch = pessoas.slice(i, i + BATCH_SIZE)
-        
-        // Atualiza progresso
-        setProgresso({ 
-          atual: i + 1, 
-          total: pessoas.length, 
-          mensagem: `Processando lote ${Math.floor(i / BATCH_SIZE) + 1}...` 
-        })
-        
-        // Processa o lote em paralelo
-        const batchPromises = batch.map(async (pessoa, batchIndex) => {
-          const globalIndex = i + batchIndex
-          const linhaReal = globalIndex + 1 // Linha real na planilha (considerando que começamos do índice 0)
-          const nome = pessoa.ALUNO || 'Sem Nome'
-          const documento = pessoa.DOCUMENTO || ''
-          const planilhaId = pessoa.ID || ''
-          
-          // Usa a função sanitizarNome com controle de duplicatas usando documento
-          const nomeSanitizado = sanitizarNome(nome, documento, pessoasProcessadas)
-          
-          // Se está no modo correção, só processa o registro com o ID especificado
-          if (modoCorrecao && String(planilhaId).trim() !== String(idCorrecao).trim()) {
-            console.log(`⏭️ Linha ${linhaReal}: Modo correção - pulando registro com ID "${planilhaId}" (não é o ID "${idCorrecao}" especificado)`)
-            return {
-              nome: nomeSanitizado,
-              certificadoCompleto: new Blob(),
-              sucesso: false,
-              erro: `Modo correção - ID "${planilhaId}" não corresponde ao ID "${idCorrecao}" especificado`,
-              linha: linhaReal,
-              skipped: true
-            }
-          }
-          
-          // Verifica se é um registro com "Sem Nome" - não gera certificado
-          if (nome === 'Sem Nome' || nome.trim() === '') {
-            // console.log(`❌ Linha ${linhaReal}: Nome vazio ou "Sem Nome"`)
-            return {
-              nome: 'Sem Nome',
-              certificadoCompleto: new Blob(),
-              sucesso: false,
-              erro: 'Nome do aluno está vazio',
-              linha: linhaReal,
-              skipped: true
-            }
-          }
-          
-          // Verifica outros campos importantes na ordem especificada
-          const temNome = pessoa.ALUNO && pessoa.ALUNO.trim() !== ''
-          const temDocumento = pessoa.DOCUMENTO && pessoa.DOCUMENTO.trim() !== ''
-          const temEmpresa = pessoa.EMPRESA && pessoa.EMPRESA.trim() !== ''
-          const temTreinamento = pessoa.TREINAMENTO && pessoa.TREINAMENTO.trim() !== ''
-          const temInstrutor = pessoa.INSTRUTOR && pessoa.INSTRUTOR.trim() !== ''
-          const temCargaHoraria = pessoa['CARGA HORARIA'] && pessoa['CARGA HORARIA'].toString().trim() !== ''
-          const temDataConclusao = pessoa['DATA CONCLUSÃO'] && pessoa['DATA CONCLUSÃO'].toString().trim() !== ''
-          
-          // Verifica se há campos vazios importantes na ordem especificada
-          const errosCampos: string[] = []
-          
-          // 1. Documento (caso haja e não haja nome)
-          if (!temNome && !temDocumento) {
-            errosCampos.push('Documento está vazio')
-          }
-          
-          // 2. Aluno (caso haja)
-          if (!temNome) {
-            errosCampos.push('Nome do aluno está vazio')
-          }
-          
-          // 3. Outros campos obrigatórios
-          if (!temEmpresa) errosCampos.push('Empresa está vazia')
-          if (!temTreinamento) errosCampos.push('Treinamento está vazio')
-          if (!temInstrutor) errosCampos.push('Nome do instrutor está vazio')
-          if (!temCargaHoraria) errosCampos.push('Carga horária está vazia')
-          if (!temDataConclusao) errosCampos.push('Data de conclusão está vazia')
-          
-          // Se há campos vazios importantes, não gera certificado
-          if (errosCampos.length > 0) {
-            // console.log(`❌ Linha ${linhaReal}: Erros de validação - ${errosCampos.join(', ')}`)
-            return {
-              nome: nome,
-              certificadoCompleto: new Blob(),
-              sucesso: false,
-              erro: errosCampos.join(', '),
-              linha: linhaReal,
-              skipped: true
-            }
-          }
-          
-          // console.log(`✅ Linha ${linhaReal}: Nome sanitizado = "${nomeSanitizado}"`)
-          
-          try {
-            // Primeiro, verifica se o ID já existe no banco
-            const dadosCertificado = prepararDadosCertificado(pessoa)
-            // console.log('📝 Dados do certificado a serem salvos:', dadosCertificado)
-            
-            // Se estiver no modo correção, verifica se o ID da planilha corresponde ao especificado
-            if (modoCorrecao) {
-              if (!idCorrecao.trim()) {
-                // console.log('❌ Modo correção ativo mas ID não fornecido')
-                return {
-                  nome: nomeSanitizado,
-                  certificadoCompleto: new Blob(),
-                  sucesso: false,
-                  erro: 'ID de correção não fornecido',
-                  linha: linhaReal,
-                  skipped: true
-                }
-              }
-              // console.log('🔧 Modo correção ativo, verificando ID da planilha:', planilhaId)
-            }
-            
-            const response = await fetch('/api/importar-certificados', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                ...(modoCorrecao && { 'x-correcao': 'true' })
-              },
-              body: JSON.stringify(dadosCertificado),
-            })
-            
-            const result = await response.json()
-            // console.log('📊 Documento já existia?', result.exists ? 'Sim' : 'Não')
-            // console.log('📊 Resultado completo da API:', result)
-            
-            // Verifica se o certificado já existe no banco
-            if (result.exists && !modoCorrecao) {
-              console.log(`⏭️ Linha ${linhaReal}: Certificado já existe no banco, pulando geração do PDF`)
-              return {
-                nome: nomeSanitizado,
-                certificadoCompleto: new Blob(),
-                sucesso: false,
-                erro: 'Certificado já existe no banco de dados',
-                linha: linhaReal,
-                skipped: true
-              }
-            }
-            
-            // Verifica se houve erro na API
-            if (!result.success) {
-              console.log(`❌ Linha ${linhaReal}: Erro na API - ${result.error || 'Erro desconhecido'}`)
-              return {
-                nome: nomeSanitizado,
-                certificadoCompleto: new Blob(),
-                sucesso: false,
-                erro: result.error || 'Erro na API',
-                linha: linhaReal,
-                skipped: true
-              }
-            }
-            
-            // Se está no modo correção, sempre gera o PDF (sobrescreve dados)
-            if (modoCorrecao) {
-              // console.log(`🔧 Linha ${linhaReal}: Modo correção - sobrescrevendo dados existentes`)
-            } else {
-              // console.log(`🆕 Linha ${linhaReal}: Certificado novo, gerando PDF...`)
-            }
-            
-            const firestoreId = result.id // ID do documento no Firestore
-            // console.log('🆔 ID do documento no Firestore:', firestoreId)
-            
-            // Gera QR code com o ID do Firestore
-            const urlVerificacao = `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/id/${firestoreId}`
-            // console.log('🔗 URL de verificação:', urlVerificacao)
-            const qrCodeDataURL = await QRCode.toDataURL(urlVerificacao)
-            
-            // Gera HTML da frente com QR code atualizado
-            const nome = pessoa.ALUNO || ''
-            const doc = pessoa.DOCUMENTO || ''
-            const instrutor = pessoa.INSTRUTOR || ''
-            const treinamento = pessoa.TREINAMENTO || ''
-            const cargaHoraria = pessoa['CARGA HORARIA'] || ''
-            const empresa = pessoa.EMPRESA || ''
-            
-            // Atualiza progresso individual apenas para certificados novos
-            setProgresso({ 
-              atual: globalIndex + 1, 
-              total: pessoas.length, 
-              mensagem: `Gerando PDF para: ${nome}` 
-            })
-            
-            const scriptComQR = `
-              <script>
-                document.getElementById('aluno').textContent = '${nome.replace(/'/g, "\\'")}';
-                document.getElementById('documento').textContent = 'DOC: ${doc.replace(/'/g, "\\'")}';
-                document.getElementById('treinamento').textContent = '${treinamento.replace(/'/g, "\\'")}';
-                document.getElementById('empresa').textContent = '${empresa.replace(/'/g, "\\'")}';
-                document.getElementById('cargaHoraria').textContent = '${cargaHoraria} horas';
-                document.getElementById('instrutor').textContent = '${instrutor.replace(/'/g, "\\'")}';
-                
-                // Adiciona QR code com o ID do Firestore
-                const qrCodeImg = document.getElementById('qr-code');
-                if (qrCodeImg) {
-                  qrCodeImg.src = '${qrCodeDataURL}';
-                  qrCodeImg.style.display = 'block';
-                }
-              </script>
-            `;
-            
-            const frenteHTML = templateFrente.replace('</body>', scriptComQR + '</body>')
-            
-            // Gera HTML do verso
-            const dataConclusaoFmt = pessoa['DATA CONCLUSÃO'] ? 
-              new Date(pessoa['DATA CONCLUSÃO']).toLocaleDateString('pt-BR', {
-                day: '2-digit',
-                month: 'long',
-                year: 'numeric',
-              }) : ''
-            
-            const scriptVerso = `
-              <script>
-                document.getElementById('treinamento').textContent = '${pessoa.TREINAMENTO || ''}';
-                document.getElementById('cargaHoraria').textContent = '${pessoa['CARGA HORARIA'] || ''} horas';
-                document.getElementById('dataConclusao').textContent = '${dataConclusaoFmt}';
-              </script>
-            `;
-            
-            const versoHTML = templateVerso.replace('</body>', scriptVerso + '</body>')
+      // NOVA LÓGICA: Agrupa certificados por aluno ANTES de processar
+      console.log('🔄 Agrupando certificados por aluno...')
+      const certificadosPorAluno = new Map<string, {
+        nome: string
+        documento: string
+        empresa: string
+        certificados: any[]
+      }>()
 
-            // Gera PDF completo (frente + verso)
-            let certificadoCompleto
-            try {
-              certificadoCompleto = await gerarPDFCompleto(frenteHTML, versoHTML, nomeSanitizado)
-              // console.log(`📄 PDF gerado para "${nomeSanitizado}" - Tamanho: ${certificadoCompleto.size} bytes`)
-            } catch (pdfError) {
-              console.error(`❌ Erro ao gerar PDF para "${nomeSanitizado}":`, pdfError)
-              throw new Error(`Erro na geração do PDF: ${pdfError}`)
-            }
+      // Filtra apenas pessoas válidas para processamento
+      const pessoasValidas = pessoas.filter(pessoa => {
+        const nome = pessoa.ALUNO || ''
+        const documento = pessoa.DOCUMENTO || ''
+        return nome.trim() !== '' && documento.trim() !== ''
+      })
+
+      // Agrupa por documento (identificação única do aluno)
+      pessoasValidas.forEach(pessoa => {
+        const documento = String(pessoa.DOCUMENTO || '').trim()
+        const documentoNormalizado = documento.replace(/[.\-\s]/g, '')
+        
+        if (!certificadosPorAluno.has(documentoNormalizado)) {
+          certificadosPorAluno.set(documentoNormalizado, {
+            nome: pessoa.ALUNO || '',
+            documento: documento,
+            empresa: pessoa.EMPRESA || '',
+            certificados: []
+          })
+        }
+
+        const certificado = {
+          cargaHoraria: Number(pessoa['CARGA HORARIA'] || 0),
+          dataConclusao: pessoa['DATA CONCLUSÃO'] || '',
+          dataEmissao: pessoa['DATA EMISSÃO'] || '',
+          documento: documento,
+          empresa: pessoa.EMPRESA || '',
+          id: pessoa.ID || '',
+          instrutor: pessoa.INSTRUTOR || '',
+          nome: pessoa.ALUNO || '',
+          treinamento: pessoa.TREINAMENTO || ''
+        }
+
+        certificadosPorAluno.get(documentoNormalizado)!.certificados.push(certificado)
+      })
+
+      console.log(`🎉 Agrupamento concluído: ${certificadosPorAluno.size} alunos únicos encontrados`)
+
+      // Processa cada aluno com todos os seus certificados
+      let totalProcessados = 0
+      for (const [documentoNormalizado, dadosAluno] of certificadosPorAluno) {
+        console.log(`\n=== PROCESSANDO ALUNO: ${dadosAluno.nome} ===`)
+        console.log(`📋 Total de certificados: ${dadosAluno.certificados.length}`)
+
+        // Se está no modo correção, filtra apenas o certificado com o ID especificado
+        let certificadosParaProcessar = dadosAluno.certificados
+        if (modoCorrecao) {
+          certificadosParaProcessar = dadosAluno.certificados.filter(cert => 
+            String(cert.id).trim() === String(idCorrecao).trim()
+          )
+          if (certificadosParaProcessar.length === 0) {
+            console.log(`⏭️ Modo correção: Nenhum certificado com ID "${idCorrecao}" encontrado para este aluno`)
+            continue
+          }
+          console.log(`🔧 Modo correção: Processando apenas certificado com ID "${idCorrecao}"`)
+        }
+
+        // NOVO: Verifica quais certificados já existem no banco antes de enviar para a API
+        let certificadosParaEnviar = certificadosParaProcessar
+        if (!modoCorrecao) {
+          try {
+            console.log(`🔍 Verificando certificados existentes para ${dadosAluno.nome}...`)
+            const responseVerificacao = await fetch(`/api/verificar-certificados-existentes`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                documento: dadosAluno.documento,
+                certificados: certificadosParaProcessar
+              })
+            })
             
-            return {
-              nome: nomeSanitizado,
-              certificadoCompleto,
-              sucesso: true,
-              linha: linhaReal // Adiciona a linha do sucesso
+            const resultadoVerificacao = await responseVerificacao.json()
+            if (resultadoVerificacao.success) {
+              certificadosParaEnviar = certificadosParaProcessar.filter(cert => 
+                !resultadoVerificacao.certificadosExistentes.includes(String(cert.id))
+              )
+              console.log(` Dos ${certificadosParaProcessar.length} certificados, ${certificadosParaEnviar.length} são novos`)
             }
           } catch (error) {
-            console.error(`Erro ao gerar certificado para ${nomeSanitizado}:`, error)
-            return {
-              nome: nomeSanitizado,
-              certificadoCompleto: new Blob(),
-              sucesso: false,
-              erro: error instanceof Error ? error.message : 'Erro desconhecido',
-              linha: linhaReal // Adiciona a linha do erro
+            console.warn(`⚠️ Erro ao verificar certificados existentes:`, error)
+            // Se der erro na verificação, envia todos (comportamento atual)
+            certificadosParaEnviar = certificadosParaProcessar
+          }
+        }
+
+        // Se não há certificados novos para enviar, pula
+        if (certificadosParaEnviar.length === 0) {
+          console.log(`⏭️ Nenhum certificado novo para ${dadosAluno.nome}, pulando`)
+          continue
+        }
+
+        // Envia APENAS os certificados novos para a API
+        try {
+          console.log(`📤 Enviando ${certificadosParaEnviar.length} certificados novos para a API...`)
+          
+          // Cria um objeto com apenas os certificados novos
+          const dadosParaAPI = {
+            nome: dadosAluno.nome,
+            documento: dadosAluno.documento,
+            empresa: dadosAluno.empresa,
+            certificados: certificadosParaEnviar  // ← Agora envia apenas os novos
+          }
+
+          const response = await fetch('/api/importar-certificados', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              ...(modoCorrecao && { 'x-correcao': 'true' })
+            },
+            body: JSON.stringify(dadosParaAPI),
+          })
+          
+          const result = await response.json()
+          
+          if (!result.success) {
+            console.error(`❌ Erro na API para aluno ${dadosAluno.nome}:`, result.error)
+            // Adiciona erro para cada certificado
+            certificadosParaProcessar.forEach(cert => {
+              certificadosCriados.push({
+                nome: dadosAluno.nome,
+                sucesso: false,
+                erro: result.error || 'Erro na API',
+                linha: totalProcessados + 1
+              })
+              totalProcessados++
+            })
+            continue
+          }
+
+          // IMPORTANTE: Só processa certificados que foram realmente criados/atualizados
+          const certificadosProcessados = result.results || []
+          
+          console.log(`🔍 Resultado da API para ${dadosAluno.nome}:`, result)
+          console.log(`📊 Certificados processados pela API:`, certificadosProcessados)
+          
+          if (certificadosProcessados.length === 0) {
+            console.log(`⏭️ Nenhum certificado novo para este aluno, pulando geração de PDFs`)
+            continue
+          }
+
+          // CRÍTICO: Processa APENAS os certificados retornados pela API como novos/atualizados
+          const idsProcessados = new Set((certificadosProcessados || []).map((p: any) => String(p.planilhaId)))
+          const certificadosParaPDF = certificadosParaProcessar.filter(c => idsProcessados.has(String(c.id)))
+
+          console.log(`📄 Gerando PDFs para ${certificadosParaPDF.length} certificados processados`)
+
+          // Agora processa apenas os certificados retornados pela API
+          for (const certificado of certificadosParaPDF) {
+            console.log(`🔄 Processando certificado: ${certificado.id} - ${certificado.treinamento}`)
+            
+            totalProcessados++
+            setProgresso({ 
+              atual: totalProcessados, 
+              total: pessoasValidas.length, 
+              mensagem: `Gerando PDF para: ${dadosAluno.nome} - ${certificado.treinamento}` 
+            })
+
+            try {
+              // Usa a função sanitizarNome com controle de duplicatas usando documento
+              const nomeSanitizado = sanitizarNome(dadosAluno.nome, dadosAluno.documento, pessoasProcessadas)
+              console.log(`📝 Nome sanitizado: ${nomeSanitizado}`)
+              
+              // Gera QR code com o ID do certificado da planilha para validação
+              let qrCodeDataURL = ''
+              try {
+                // Usa o ID do certificado da planilha para o QR Code
+                const urlVerificacao = `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/id/${certificado.id}`
+                qrCodeDataURL = await QRCode.toDataURL(urlVerificacao)
+                console.log(`✅ QR Code gerado para URL: ${urlVerificacao}`)
+              } catch (error) {
+                console.error('❌ Erro ao gerar QR Code:', error)
+                qrCodeDataURL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+              }
+
+              // Busca assinatura do instrutor
+              let assinaturaBase64 = ''
+              try {
+                if (certificado.instrutor && certificado.instrutor.trim()) {
+                  const response = await fetch(`/api/assinaturas/buscar?nome=${encodeURIComponent(certificado.instrutor.trim())}`)
+                  const data = await response.json()
+                  if (data.success && data.assinatura && data.assinatura.imagemBase64) {
+                    assinaturaBase64 = data.assinatura.imagemBase64
+                  }
+                }
+              } catch (error) {
+                console.error(`⚠️ Erro ao buscar assinatura para "${certificado.instrutor}":`, error)
+              }
+
+              // Substitui o placeholder da assinatura no template
+              let templateComAssinatura = templateFrente
+              if (assinaturaBase64) {
+                templateComAssinatura = templateFrente.replace('{{ASSINATURA_BASE64}}', assinaturaBase64)
+              } else {
+                templateComAssinatura = templateFrente.replace('src="data:image/png;base64,{{ASSINATURA_BASE64}}"', 'src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" style="display: none;"')
+              }
+
+              const scriptComQR = `
+                <script>
+                  document.getElementById('aluno').textContent = '${dadosAluno.nome.replace(/'/g, "\\'")}';
+                  document.getElementById('documento').textContent = 'DOC: ${dadosAluno.documento.replace(/'/g, "\\'")}';
+                  document.getElementById('treinamento').textContent = '${certificado.treinamento.replace(/'/g, "\\'")}';
+                  document.getElementById('empresa').textContent = '${dadosAluno.empresa.replace(/'/g, "\\'")}';
+                  document.getElementById('cargaHoraria').textContent = '${certificado.cargaHoraria} horas';
+                  document.getElementById('instrutor').textContent = '${certificado.instrutor.replace(/'/g, "\\'")}';
+                  
+                  const qrCodeImg = document.getElementById('qr-code');
+                  if (qrCodeImg) {
+                    qrCodeImg.src = '${qrCodeDataURL}';
+                    qrCodeImg.style.display = 'block';
+                  }
+                </script>
+              `;
+              
+              const frenteHTML = templateComAssinatura.replace('</body>', scriptComQR + '</body>')
+              
+              // Busca conteúdo pragmático
+              let conteudoPragmatico = ''
+              try {
+                if (dadosAluno.empresa && certificado.treinamento) {
+                  const response = await fetch(`/api/conteudo-pragmatico/buscar?empresa=${encodeURIComponent(dadosAluno.empresa.trim())}&treinamento=${encodeURIComponent(certificado.treinamento.trim())}`)
+                  const data = await response.json()
+                  if (data.success && data.conteudo) {
+                    conteudoPragmatico = data.conteudo.conteudo
+                  } else {
+                    conteudoPragmatico = 'Conteúdo programático específico do treinamento.'
+                  }
+                } else {
+                  conteudoPragmatico = 'Conteúdo programático específico do treinamento.'
+                }
+              } catch (error) {
+                console.error('❌ Erro ao buscar conteúdo pragmático:', error)
+                conteudoPragmatico = 'Conteúdo programático específico do treinamento.'
+              }
+              
+              // Gera HTML do verso
+              const dataConclusaoFmt = certificado.dataConclusao ? 
+                new Date(certificado.dataConclusao).toLocaleDateString('pt-BR', {
+                  day: '2-digit',
+                  month: 'long',
+                  year: 'numeric',
+                }) : ''
+              
+              const scriptVerso = `
+                <script>
+                  document.getElementById('treinamento').textContent = '${certificado.treinamento || ''}';
+                  document.getElementById('cargaHoraria').textContent = '${certificado.cargaHoraria || ''} horas';
+                  document.getElementById('dataConclusao').textContent = '${dataConclusaoFmt}';
+                  document.getElementById('conteudo-pragmatico').textContent = '${conteudoPragmatico.replace(/'/g, "\\'").replace(/\n/g, '\\n')}';
+                </script>
+              `;
+              
+              const versoHTML = templateVerso
+                .replace('{{CONTEUDO_PRAGMATICO}}', conteudoPragmatico)
+                .replace('</body>', scriptVerso + '</body>')
+
+              console.log(`📄 Chamando API para gerar PDF: ${nomeSanitizado}`)
+              console.log(`📏 Tamanho HTML frente: ${frenteHTML.length}`)
+              console.log(` Tamanho HTML verso: ${versoHTML.length}`)
+              
+              // Gera PDF completo usando a API diretamente
+              try {
+                console.log(` Chamando API /api/gerar-pdf...`)
+                
+                const pdfResponse = await fetch('/api/gerar-pdf', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    frenteHTML,
+                    versoHTML,
+                    nomeArquivo: nomeSanitizado
+                  })
+                })
+
+                console.log(`📡 Resposta da API PDF: ${pdfResponse.status} ${pdfResponse.statusText}`)
+
+                if (!pdfResponse.ok) {
+                  const errorText = await pdfResponse.text()
+                  console.error(`❌ Erro na API de PDF: ${pdfResponse.status} - ${errorText}`)
+                  throw new Error(`Erro na API de PDF: ${pdfResponse.status} - ${errorText}`)
+                }
+
+                const pdfResult = await pdfResponse.json()
+                console.log(`📄 Resultado da API PDF:`, pdfResult)
+                
+                if (!pdfResult.success) {
+                  console.error(`❌ API de PDF retornou erro:`, pdfResult.error)
+                  throw new Error(pdfResult.error || 'Erro ao gerar PDF')
+                }
+
+                if (!pdfResult.pdfBase64) {
+                  console.error(`❌ API de PDF não retornou pdfBase64`)
+                  throw new Error('API de PDF não retornou dados do PDF')
+                }
+
+                console.log(`✅ PDF base64 recebido, tamanho: ${pdfResult.pdfBase64.length} caracteres`)
+
+                // Converte base64 para blob
+                const pdfBytes = atob(pdfResult.pdfBase64)
+                const pdfArray = new Uint8Array(pdfBytes.length)
+                for (let i = 0; i < pdfBytes.length; i++) {
+                  pdfArray[i] = pdfBytes.charCodeAt(i)
+                }
+
+                const certificadoCompleto = new Blob([pdfArray], { type: 'application/pdf' })
+                console.log(`✅ Blob criado com sucesso, tamanho: ${certificadoCompleto.size} bytes`)
+                
+                // Adiciona ao array de PDFs
+                pdfDataArray.push({
+                  nome: nomeSanitizado,
+                  certificadoCompleto: certificadoCompleto
+                })
+
+                // Marca como sucesso
+                certificadosCriados.push({
+                  nome: nomeSanitizado,
+                  sucesso: true,
+                  linha: totalProcessados
+                })
+
+                console.log(`✅ PDF adicionado ao array para "${nomeSanitizado}" - ${certificado.treinamento}`)
+                console.log(`📊 Total de PDFs no array: ${pdfDataArray.length}`)
+                
+              } catch (pdfError) {
+                console.error(`❌ Erro específico na geração do PDF para ${nomeSanitizado}:`, pdfError)
+                throw pdfError // Re-lança o erro para ser capturado pelo catch externo
+              }
+
+            } catch (error) {
+              console.error(`❌ Erro ao gerar PDF para ${dadosAluno.nome}:`, error)
+              certificadosCriados.push({
+                nome: dadosAluno.nome,
+                sucesso: false,
+                erro: error instanceof Error ? error.message : 'Erro desconhecido',
+                linha: totalProcessados
+              })
             }
           }
-        })
-        
-        // Aguarda o lote atual terminar
-        const batchResults = await Promise.all(batchPromises)
-        
-        // Adiciona resultados aos arrays (apenas os que não foram pulados)
-        for (const result of batchResults) {
-          if (result.sucesso) {
-            // console.log(`🎉 Sucesso: "${result.nome}" - PDF gerado`)
-            pdfDataArray.push({
-              nome: result.nome,
-              certificadoCompleto: result.certificadoCompleto
+
+        } catch (error) {
+          console.error(`❌ Erro ao processar aluno ${dadosAluno.nome}:`, error)
+          // Marca todos os certificados deste aluno como erro
+          certificadosParaProcessar.forEach(cert => {
+            certificadosCriados.push({
+              nome: dadosAluno.nome,
+              sucesso: false,
+              erro: error instanceof Error ? error.message : 'Erro desconhecido',
+              linha: totalProcessados + 1
             })
-            // console.log(`📦 PDF adicionado ao array. Total atual: ${pdfDataArray.length}`)
-          } else if (!result.skipped) {
-            // console.log(`💥 Falha: "${result.nome}" - ${result.erro}`)
-          } else {
-            // console.log(`⏭️ Pulado: "${result.nome}" - ${result.erro}`)
-          }
-          
-          certificadosCriados.push({
-            nome: result.nome,
-            sucesso: result.sucesso,
-            erro: result.erro,
-            linha: result.linha
+            totalProcessados++
           })
         }
       }
-      
-      // console.log(`📊 RESUMO DO PROCESSAMENTO:`)
-      // console.log(`📦 PDFs no array: ${pdfDataArray.length}`)
-      // console.log(`📋 Certificados processados: ${certificadosCriados.length}`)
-      // console.log(`✅ Sucessos: ${certificadosCriados.filter(c => c.sucesso).length}`)
-      // console.log(`❌ Erros: ${certificadosCriados.filter(c => !c.sucesso && !c.skipped).length}`)
-      // console.log(`⏭️ Pulados: ${certificadosCriados.filter(c => c.skipped).length}`)
-      
-      // Cria arquivo ZIP com todos os PDFs (apenas os bem-sucedidos)
+
+      // Cria arquivo ZIP com todos os PDFs
       if (pdfDataArray.length > 0) {
-        // console.log(`🗜️ Criando ZIP com ${pdfDataArray.length} PDFs...`)
         setProgresso({ 
-          atual: pessoas.length, 
-          total: pessoas.length, 
+          atual: pessoasValidas.length, 
+          total: pessoasValidas.length, 
           mensagem: 'Criando arquivo ZIP...' 
         })
         
         const zipBlob = await criarZIPComPDFs(pdfDataArray)
-        
-        // Faz download do ZIP
         const dataAtual = new Date().toISOString().split('T')[0]
         downloadBlob(zipBlob, `certificados_${dataAtual}.zip`)
-        // console.log(`✅ ZIP criado e baixado com sucesso!`)
+        console.log(`✅ ZIP criado e baixado com sucesso!`)
+        
+        // Chama a sincronização de alunos após o download do ZIP
+        try {
+          console.log('🔄 Iniciando sincronização de alunos após download do ZIP...')
+          const syncResponse = await fetch('/api/sincronizar-alunos', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          })
+          
+          if (syncResponse.ok) {
+            const syncResult = await syncResponse.json()
+            console.log('✅ Sincronização concluída:', syncResult.message)
+          } else {
+            console.log('⚠️ Erro na sincronização, mas ZIP foi baixado com sucesso')
+          }
+        } catch (syncError) {
+          console.log('⚠️ Erro na sincronização, mas ZIP foi baixado com sucesso:', syncError)
+        }
         
         // Limpa o campo de correção após o download
         if (modoCorrecao) {
           setIdCorrecao('')
           setModoCorrecao(false)
-          // console.log('🧹 Campos de correção limpos')
+          console.log('🔄 Campos de correção limpos')
         }
-      } else {
-        // console.log(`⚠️ Nenhum PDF foi gerado para incluir no ZIP`)
       }
-      
+
       // Calcula estatísticas finais
       const sucessos = certificadosCriados.filter(c => c.sucesso).length
       const erros = certificadosCriados.filter(c => !c.sucesso).length
       const endTime = performance.now()
       const tempoTotal = (endTime - startTime) / 1000
       const tempoMedio = sucessos > 0 ? tempoTotal / sucessos : 0
-      
-      // console.log(`📊 RESUMO FINAL:`)
-      // console.log(`✅ Sucessos: ${sucessos}`)
-      // console.log(`❌ Erros: ${erros}`)
-      // console.log(`⏱️ Tempo total: ${tempoTotal.toFixed(2)}s`)
-      // console.log(`📈 Tempo médio: ${tempoMedio.toFixed(2)}s`)
       
       setResultadoGeracao({
         sucessos,
@@ -540,53 +632,8 @@ export default function Dashboard({ usuario, onLogout }: DashboardProps) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Navbar fixa no topo */}
-      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <img src="/OwlTechLogo.png" alt="Logo ISP Certificados" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
-            <span className="font-bold text-white text-lg">ISP CERTIFICADOS</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/alunos')}
-            >
-              Alunos
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/relatorios')}
-            >
-              Relatórios
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={handleCadastrarUsuario}
-            >
-              Usuários
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/assinaturas')}
-            >
-              Assinaturas
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={onLogout}
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </nav>
+      {/* Usando o componente Navbar */}
+      <Navbar currentPage="dashboard" usuario={usuario} onLogout={onLogout} />
       <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
       {/* Main Content */}

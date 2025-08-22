@@ -15,6 +15,7 @@ import { AlertCircle, CheckCircle, Eye, EyeOff, Clock } from "lucide-react"
 import { firebaseAuth, firestore } from "@/lib/firebase"
 import { confirmPasswordReset, verifyPasswordResetCode, updatePassword, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth"
 import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore"
+import ProtectedRoute from "@/components/protected-route"
 
 // Definir tipo auxiliar para os dados do usuário
 interface UsuarioFirestore {
@@ -32,6 +33,10 @@ export default function AlterarSenhaPage() {
   const oobCode = searchParams.get("oobCode") // Firebase usa oobCode para reset de senha
   const primeiroLogin = searchParams.get("primeiro_login") === "true"
   const emailParam = searchParams.get("email")
+
+  // Para páginas de alterar senha, não precisamos de proteção completa
+  // pois são acessadas via links específicos
+  const isProtectedRoute = false
 
   const [novaSenha, setNovaSenha] = useState("")
   const [confirmarSenha, setConfirmarSenha] = useState("")

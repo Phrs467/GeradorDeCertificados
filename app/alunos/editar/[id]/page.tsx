@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { collection, query, where, getDocs, doc, getDoc, updateDoc, getFirestore, addDoc } from "firebase/firestore"
 import { firebaseApp } from "@/lib/firebase"
 import { User, Building, Calendar, Clock, Award, ArrowLeft, Save, Edit } from "lucide-react"
+import ProtectedRoute from "@/components/protected-route"
 
 interface Certificado {
   id: string
@@ -74,19 +75,25 @@ export default function EditarCertificado() {
       if (!alunoSnap.exists()) throw new Error("Aluno não encontrado")
       const alunoData = alunoSnap.data()
       
-      // Verifica se o nome do aluno mudou
+      // Verifica se o nome ou documento do aluno mudou
       const nomeOriginal = alunoData.certificados[certIndex]?.nome || ''
       const nomeNovo = certificado.nome
+      const documentoOriginal = alunoData.certificados[certIndex]?.documento || ''
+      const documentoNovo = certificado.documento
       const nomeMudou = nomeOriginal !== nomeNovo
+      const documentoMudou = documentoOriginal !== documentoNovo
       
-      console.log('🔍 Verificando mudança de nome:', {
+      console.log('🔍 Verificando mudanças:', {
         nomeOriginal,
         nomeNovo,
-        nomeMudou
+        nomeMudou,
+        documentoOriginal,
+        documentoNovo,
+        documentoMudou
       })
       
-      if (nomeMudou) {
-        console.log('🔧 Nome mudou, movendo certificado para novo aluno')
+      if (nomeMudou || documentoMudou) {
+        console.log('🔧 Nome ou documento mudou, movendo certificado para novo aluno')
         
         // Remove o certificado do aluno antigo
         const certificadosAntigos = Array.isArray(alunoData.certificados) ? [...alunoData.certificados] : []
@@ -94,31 +101,31 @@ export default function EditarCertificado() {
         await updateDoc(alunoRef, { certificados: certificadosAntigos })
         console.log('✅ Certificado removido do aluno antigo')
         
-        // Verifica se existe um aluno com o novo nome
+        // Verifica se existe um aluno com o novo documento (identificação única)
         const alunosRef = collection(db, "alunos")
-        const qNovoAluno = query(alunosRef, where("nome", "==", nomeNovo), where("documento", "==", certificado.documento))
+        const qNovoAluno = query(alunosRef, where("documento", "==", documentoNovo))
         const novoAlunoSnap = await getDocs(qNovoAluno)
         
-        console.log('🔍 Verificando se existe aluno com novo nome:', nomeNovo)
+        console.log('🔍 Verificando se existe aluno com novo documento:', documentoNovo)
         console.log('🔍 Resultado da busca:', novoAlunoSnap.empty ? 'Não encontrou' : 'Encontrou')
         
         if (!novoAlunoSnap.empty) {
-          // Aluno com novo nome já existe, adiciona o certificado
+          // Aluno com novo documento já existe, adiciona o certificado
           const novoAlunoDoc = novoAlunoSnap.docs[0]
           const novoAlunoData = novoAlunoDoc.data()
           const novosCertificados = Array.isArray(novoAlunoData.certificados) ? [...novoAlunoData.certificados] : []
           novosCertificados.push(certificado)
           await updateDoc(novoAlunoDoc.ref, { certificados: novosCertificados })
-          console.log('✅ Certificado movido para aluno existente com novo nome')
-          alert("Certificado movido para aluno com novo nome!")
+          console.log('✅ Certificado movido para aluno existente com novo documento')
+          alert("Certificado movido para aluno com novo documento!")
           // Redireciona para o perfil do novo aluno
           window.location.href = `/alunos/${novoAlunoDoc.id}/${encodeURIComponent(certificado.nome)}`
         } else {
-          // Cria novo aluno com o novo nome
-          console.log('🔧 Criando novo aluno com nome:', nomeNovo)
+          // Cria novo aluno com o novo documento
+          console.log('🔧 Criando novo aluno com documento:', documentoNovo)
           const novoAluno = {
             nome: nomeNovo,
-            documento: certificado.documento || '',
+            documento: documentoNovo,
             empresa: certificado.empresa || '',
             certificados: [certificado]
           }
@@ -130,8 +137,8 @@ export default function EditarCertificado() {
           window.location.href = `/alunos/${docRef.id}/${encodeURIComponent(certificado.nome)}`
         }
       } else {
-        // Nome não mudou, apenas atualiza o certificado
-        console.log('✅ Nome não mudou, atualizando certificado no aluno existente')
+        // Nome e documento não mudaram, apenas atualiza o certificado
+        console.log('✅ Nome e documento não mudaram, atualizando certificado no aluno existente')
         const certificados = Array.isArray(alunoData.certificados) ? [...alunoData.certificados] : []
         certificados[certIndex] = { ...certificado }
         await updateDoc(alunoRef, { certificados })
@@ -171,9 +178,10 @@ export default function EditarCertificado() {
   )
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Navbar fixa no topo */}
-      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+        {/* Navbar fixa no topo */}
+        <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
           <div className="flex items-center gap-4">
             <img src="/OwlTechLogo.png" alt="Logo OwlTech" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
@@ -196,6 +204,18 @@ export default function EditarCertificado() {
               onClick={() => router.push('/relatorios')}
             >
               Relatórios
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/cadastrar-usuario')}
+            >
+              Usuários
+            </button>
+            <button
+              className="text-white hover:text-blue-200 font-medium transition"
+              onClick={() => router.push('/assinaturas')}
+            >
+              Assinaturas
             </button>
             <button
               className="text-white hover:text-blue-200 font-medium transition"
@@ -341,9 +361,10 @@ export default function EditarCertificado() {
                 Cancelar
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      </main>
+                  </CardContent>
+      </Card>
+    </main>
     </div>
+    </ProtectedRoute>
   )
 } 

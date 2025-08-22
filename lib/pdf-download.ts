@@ -16,6 +16,64 @@ export interface CertificadoData {
   dataEmissao: string
 }
 
+// Função para converter imagem para base64
+function converterImagemParaBase64(caminhoImagem: string): string {
+  try {
+    const imagemBuffer = readFileSync(caminhoImagem)
+    const base64 = imagemBuffer.toString('base64')
+    const extensao = caminhoImagem.split('.').pop()?.toLowerCase()
+    return `data:image/${extensao};base64,${base64}`
+  } catch (error) {
+    console.error('Erro ao converter imagem para base64:', error)
+    return ''
+  }
+}
+
+// Função para buscar conteúdo pragmático
+async function buscarConteudoPragmatico(empresa: string, treinamento: string): Promise<string> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    const response = await fetch(`${baseUrl}/api/conteudo-pragmatico/buscar?empresa=${encodeURIComponent(empresa.trim())}&treinamento=${encodeURIComponent(treinamento.trim())}`)
+    const data = await response.json()
+    
+    if (data.success && data.conteudo) {
+      console.log(`✅ Conteúdo pragmático encontrado para: ${empresa} - ${treinamento}`)
+      return data.conteudo.conteudo
+    } else {
+      console.log(`❌ Conteúdo pragmático não encontrado para: ${empresa} - ${treinamento}`)
+      return 'Conteúdo programático específico do treinamento.'
+    }
+  } catch (error) {
+    console.error('❌ Erro ao buscar conteúdo pragmático:', error)
+    return 'Conteúdo programático específico do treinamento.'
+  }
+}
+
+// Função para buscar assinatura do instrutor
+async function buscarAssinaturaInstrutor(instrutor: string): Promise<string> {
+  try {
+    if (!instrutor || instrutor.trim() === '') {
+      console.log('❌ Nome do instrutor não fornecido')
+      return ''
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+    const response = await fetch(`${baseUrl}/api/assinaturas/buscar?nome=${encodeURIComponent(instrutor.trim())}`)
+    const data = await response.json()
+    
+    if (data.success && data.assinatura) {
+      console.log(`✅ Assinatura encontrada para instrutor: ${instrutor}`)
+      return data.assinatura.imagemBase64
+    } else {
+      console.log(`❌ Assinatura não encontrada para instrutor: ${instrutor}`)
+      return ''
+    }
+  } catch (error) {
+    console.error('❌ Erro ao buscar assinatura do instrutor:', error)
+    return ''
+  }
+}
+
 export async function gerarPDFIndividual(certificado: CertificadoData): Promise<Blob> {
   try {
     // Carrega os templates diretamente do sistema de arquivos
@@ -23,11 +81,44 @@ export async function gerarPDFIndividual(certificado: CertificadoData): Promise<
     const templateFrente = readFileSync(join(publicDir, 'template-frente.html'), 'utf-8')
     const templateVerso = readFileSync(join(publicDir, 'template-verso.html'), 'utf-8')
 
-    // Gera QR code com o ID do Firestore
+    // Converte as imagens para base64
+    const caminhoImagem1 = join(process.cwd(), 'imgs', 'ri_1.jpeg')
+    const caminhoImagem2 = join(process.cwd(), 'imgs', 'ri_2.png')
+    const imagem1Base64 = converterImagemParaBase64(caminhoImagem1)
+    const imagem2Base64 = converterImagemParaBase64(caminhoImagem2)
+    
+    // Substitui os caminhos das imagens por base64 nos templates
+    const templateFrenteComImagens = templateFrente
+      .replace(
+        "background: url('../imgs/ri_1.jpeg') no-repeat center center;",
+        `background: url('${imagem1Base64}') no-repeat center center;`
+      )
+      .replace(
+        'src="../imgs/ri_2.png"',
+        `src="${imagem2Base64}"`
+      )
+    
+    const templateVersoComImagens = templateVerso
+      .replace(
+        "background: url('../imgs/ri_1.jpeg') no-repeat center center;",
+        `background: url('${imagem1Base64}') no-repeat center center;`
+      )
+
+    // Busca conteúdo pragmático e assinatura em paralelo
+    const [conteudoPragmatico, assinaturaBase64] = await Promise.all([
+      certificado.empresa && certificado.treinamento 
+        ? buscarConteudoPragmatico(certificado.empresa, certificado.treinamento)
+        : Promise.resolve('Conteúdo programático específico do treinamento.'),
+      certificado.instrutor 
+        ? buscarAssinaturaInstrutor(certificado.instrutor)
+        : Promise.resolve('')
+    ])
+
+    // Gera QR code com o ID do certificado específico
     const urlVerificacao = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/id/${certificado.id}`
     const qrCodeDataURL = await QRCode.toDataURL(urlVerificacao)
     
-    // Gera HTML da frente com QR code atualizado
+    // Gera HTML da frente com QR code e assinatura atualizados
     const scriptComQR = `
       <script>
         document.getElementById('aluno').textContent = '${certificado.aluno.replace(/'/g, "\\'")}';
@@ -43,10 +134,19 @@ export async function gerarPDFIndividual(certificado: CertificadoData): Promise<
           qrCodeImg.src = '${qrCodeDataURL}';
           qrCodeImg.style.display = 'block';
         }
+        
+        // Adiciona assinatura do instrutor se disponível
+        const assinaturaImg = document.getElementById('assinatura-instrutor');
+        if (assinaturaImg && '${assinaturaBase64}') {
+          assinaturaImg.src = 'data:image/png;base64,${assinaturaBase64}';
+          assinaturaImg.style.display = 'block';
+        }
       </script>
     `;
     
-    const frenteHTML = templateFrente.replace('</body>', scriptComQR + '</body>')
+    // Substitui o placeholder da assinatura no template
+    const templateFrenteComAssinatura = templateFrenteComImagens.replace('{{ASSINATURA_BASE64}}', assinaturaBase64)
+    const frenteHTML = templateFrenteComAssinatura.replace('</body>', scriptComQR + '</body>')
     
     // Gera HTML do verso
     const dataConclusaoFmt = certificado.dataConclusao ? 
@@ -61,10 +161,13 @@ export async function gerarPDFIndividual(certificado: CertificadoData): Promise<
         document.getElementById('treinamento').textContent = '${certificado.treinamento || ''}';
         document.getElementById('cargaHoraria').textContent = '${certificado.cargaHoraria || ''} horas';
         document.getElementById('dataConclusao').textContent = '${dataConclusaoFmt}';
+        document.getElementById('conteudo-pragmatico').textContent = '${conteudoPragmatico.replace(/'/g, "\\'").replace(/\n/g, '\\n')}';
       </script>
     `;
     
-    const versoHTML = templateVerso.replace('</body>', scriptVerso + '</body>')
+    // Substitui o placeholder do conteúdo pragmático no template
+    const templateVersoComConteudo = templateVersoComImagens.replace('{{CONTEUDO_PRAGMATICO}}', conteudoPragmatico)
+    const versoHTML = templateVersoComConteudo.replace('</body>', scriptVerso + '</body>')
 
     // Inicia o browser com otimizações
     const browser = await puppeteer.launch({
@@ -83,28 +186,28 @@ export async function gerarPDFIndividual(certificado: CertificadoData): Promise<
     try {
       const page = await browser.newPage()
       
-      // Configura viewport e otimizações
-      await page.setViewport({ width: 950, height: 670 })
+      // Configura viewport e otimizações para modo paisagem
+      await page.setViewport({ width: 1600, height: 1200 })
       await page.setCacheEnabled(false)
       
       // Gera PDF da frente com otimizações
       await page.setContent(frenteHTML, { waitUntil: 'domcontentloaded' })
       const pdfFrente = await page.pdf({
         printBackground: true,
-        width: '950px',
-        height: '670px',
+        format: 'A4',
+        landscape: true,
         margin: { top: 0, bottom: 0, left: 0, right: 0 },
-        preferCSSPageSize: true
+        preferCSSPageSize: false
       })
       
       // Gera PDF do verso com otimizações
       await page.setContent(versoHTML, { waitUntil: 'domcontentloaded' })
       const pdfVerso = await page.pdf({
         printBackground: true,
-        width: '950px',
-        height: '670px',
+        format: 'A4',
+        landscape: true,
         margin: { top: 0, bottom: 0, left: 0, right: 0 },
-        preferCSSPageSize: true
+        preferCSSPageSize: false
       })
       
       // Combina os PDFs em um só

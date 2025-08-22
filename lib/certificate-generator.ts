@@ -312,7 +312,7 @@ export async function gerarHTMLCertificado(pessoa: Pessoa, template: string): Pr
       <div style="display: flex; justify-content: space-around; margin-top: 40px; padding: 0 20px;">
         ${assinaturaInstrutor ? `
           <div style="text-align: center;">
-            <img src="${assinaturaInstrutor.urlImagem}" 
+            <img src="data:image/png;base64,${assinaturaInstrutor.imagemBase64}" 
                  alt="Assinatura de ${assinaturaInstrutor.nome}" 
                  style="max-width: 180px; max-height: 70px; object-fit: contain;"
                  onerror="this.style.display='none';">
@@ -324,7 +324,7 @@ export async function gerarHTMLCertificado(pessoa: Pessoa, template: string): Pr
         ` : ''}
         ${assinaturaCoordenador ? `
           <div style="text-align: center;">
-            <img src="${assinaturaCoordenador.urlImagem}" 
+            <img src="data:image/png;base64,${assinaturaCoordenador.imagemBase64}" 
                  alt="Assinatura de ${assinaturaCoordenador.nome}" 
                  style="max-width: 180px; max-height: 70px; object-fit: contain;"
                  onerror="this.style.display='none';">

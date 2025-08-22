@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label"
 import { collection, getDocs, getFirestore } from "firebase/firestore"
 import { firebaseApp } from "@/lib/firebase"
 import { FileText, Calendar, Download, ArrowLeft, Filter } from "lucide-react"
+import ProtectedRoute from "@/components/protected-route"
+import Navbar from '@/components/navbar'
 
 interface Certificado {
   id: string
@@ -33,6 +35,14 @@ interface RelatorioData {
   id: string
 }
 
+interface Usuario {
+  id: string
+  nome: string
+  email: string
+  chave_de_acesso: string
+  funcao?: string
+}
+
 export default function Relatorios() {
   const router = useRouter()
   const [dataInicio, setDataInicio] = useState("")
@@ -40,9 +50,31 @@ export default function Relatorios() {
   const [certificados, setCertificados] = useState<RelatorioData[]>([])
   const [loading, setLoading] = useState(false)
   const [filtrados, setFiltrados] = useState<RelatorioData[]>([])
+  const [usuario, setUsuario] = useState<Usuario | null>(null)
+
+  // Verificar autenticação
+  useEffect(() => {
+    const sessionUser = sessionStorage.getItem('usuario')
+    if (sessionUser) {
+      try {
+        const usuarioData = JSON.parse(sessionUser) as Usuario
+        setUsuario(usuarioData)
+      } catch (error) {
+        console.error('❌ Erro ao parsear dados da sessão:', error)
+        sessionStorage.removeItem('usuario')
+        router.push('/')
+        return
+      }
+    } else {
+      router.push('/')
+      return
+    }
+  }, [router])
 
   // Carregar todos os certificados
   useEffect(() => {
+    if (!usuario) return // Só carrega se o usuário estiver autenticado
+    
     async function fetchCertificados() {
       try {
         setLoading(true)
@@ -83,7 +115,16 @@ export default function Relatorios() {
     }
     
     fetchCertificados()
-  }, [])
+  }, [usuario])
+
+  const handleLogout = async () => {
+    try {
+      sessionStorage.removeItem('usuario')
+      router.push('/')
+    } catch (error) {
+      console.error('❌ Erro ao fazer logout:', error)
+    }
+  }
 
   // Filtrar por data
   const filtrarPorData = () => {
@@ -340,53 +381,10 @@ export default function Relatorios() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Navbar fixa no topo */}
-      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <img src="/OwlTechLogo.png" alt="Logo ISP Certificados" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
-            <span className="font-bold text-white text-lg">ISP CERTIFICADOS</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/alunos')}
-            >
-              Alunos
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition border-b-2 border-white"
-            >
-              Relatórios
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/cadastrar-usuario')}
-            >
-              Usuários
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/assinaturas')}
-            >
-              Assinaturas
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/logout')}
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </nav>
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+      {/* Usando o componente Navbar */}
+      <Navbar currentPage="relatorios" usuario={usuario} onLogout={handleLogout} />
       <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
       {/* Main Content */}
@@ -565,5 +563,6 @@ export default function Relatorios() {
         )}
       </main>
     </div>
+    </ProtectedRoute>
   )
 } 

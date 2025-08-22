@@ -8,6 +8,8 @@ import { useRouter } from "next/navigation"
 import { collection, getDocs, getFirestore } from "firebase/firestore"
 import { firebaseApp } from "@/lib/firebase"
 import { Search, Users, Building, User, Hash } from "lucide-react"
+import ProtectedRoute from "@/components/protected-route"
+import Navbar from '@/components/navbar'
 
 interface Aluno {
   id: string
@@ -17,6 +19,14 @@ interface Aluno {
   certificados: any[]
 }
 
+interface Usuario {
+  id: string
+  nome: string
+  email: string
+  chave_de_acesso: string
+  funcao?: string
+}
+
 export default function ListaAlunos() {
   const [alunos, setAlunos] = useState<Aluno[]>([])
   const [empresas, setEmpresas] = useState<string[]>([])
@@ -24,9 +34,27 @@ export default function ListaAlunos() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("todas")
   const [filtroId, setFiltroId] = useState("")
   const [loading, setLoading] = useState(true)
+  const [usuario, setUsuario] = useState<Usuario | null>(null)
   const router = useRouter()
 
   useEffect(() => {
+    // Verificar autenticação
+    const sessionUser = sessionStorage.getItem('usuario')
+    if (sessionUser) {
+      try {
+        const usuarioData = JSON.parse(sessionUser) as Usuario
+        setUsuario(usuarioData)
+      } catch (error) {
+        console.error('❌ Erro ao parsear dados da sessão:', error)
+        sessionStorage.removeItem('usuario')
+        router.push('/')
+        return
+      }
+    } else {
+      router.push('/')
+      return
+    }
+
     async function fetchAlunos() {
       setLoading(true)
       const db = getFirestore(firebaseApp)
@@ -50,7 +78,16 @@ export default function ListaAlunos() {
       setLoading(false)
     }
     fetchAlunos()
-  }, [])
+  }, [router])
+
+  const handleLogout = async () => {
+    try {
+      sessionStorage.removeItem('usuario')
+      router.push('/')
+    } catch (error) {
+      console.error('❌ Erro ao fazer logout:', error)
+    }
+  }
 
   const alunosFiltrados = alunos.filter(
     (a) => {
@@ -70,62 +107,19 @@ export default function ListaAlunos() {
   )
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Navbar fixa no topo */}
-      <nav className="fixed top-0 left-0 w-full z-50 shadow border-b border-blue-900" style={{height: 60, backgroundColor: '#06459a'}}>
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
-          <div className="flex items-center gap-4">
-            <img src="/OwlTechLogo.png" alt="Logo ISP Certificados" className="w-8 h-8 object-contain bg-white rounded-lg" style={{ padding: 2 }} />
-            <span className="font-bold text-white text-lg">ISP CERTIFICADOS</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition border-b-2 border-white"
-            >
-              Alunos
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/relatorios')}
-            >
-              Relatórios
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/cadastrar-usuario')}
-            >
-              Usuários
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/assinaturas')}
-            >
-              Assinaturas
-            </button>
-            <button
-              className="text-white hover:text-blue-200 font-medium transition"
-              onClick={() => router.push('/logout')}
-            >
-              Sair
-            </button>
-          </div>
-        </div>
-      </nav>
-      <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+        {/* Usando o componente Navbar */}
+        <Navbar currentPage="alunos" usuario={usuario} onLogout={handleLogout} />
+        <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        {/* Header da página */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <Users className="h-8 w-8 text-blue-600" />
-            <h1 className="text-3xl font-bold text-gray-900">Gerenciar Alunos</h1>
+        {/* Main Content */}
+        <main className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+          {/* Header da página */}
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-2">
+              <Users className="h-8 w-8 text-blue-600" />
+              <h1 className="text-3xl font-bold text-gray-900">Gerenciar Alunos</h1>
           </div>
           <p className="text-gray-600">Busque e visualize os alunos cadastrados no sistema</p>
         </div>
@@ -278,5 +272,6 @@ export default function ListaAlunos() {
         )}
       </main>
     </div>
+    </ProtectedRoute>
   )
 } 

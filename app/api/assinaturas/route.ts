@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
       assinaturas.push({
         id: doc.id,
         nome: data.nome,
-        urlImagem: data.urlImagem,
+        imagemBase64: data.imagemBase64,
         dataCriacao: data.dataCriacao?.toDate?.() || data.dataCriacao
       })
     })
