@@ -13,8 +13,7 @@ import ProtectedRoute from "@/components/protected-route"
 interface Certificado {
   id: string
   cargaHoraria: string | number
-  dataConclusao: string
-  dataEmissao: string
+  dataConclusao: stringk
   documento: string
   empresa: string
   instrutor: string
