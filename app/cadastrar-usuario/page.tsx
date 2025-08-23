@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AlertCircle, UserPlus, CheckCircle } from "lucide-react"
+import ProtectedRoute from "@/components/protected-route"
 import Navbar from '@/components/navbar'
 
 interface Usuario {
@@ -169,21 +170,22 @@ export default function CadastrarUsuarioPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
-      {/* Usando o componente Navbar */}
-      <Navbar currentPage="usuarios" usuario={usuario || undefined} onLogout={handleLogout} />
-      <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
+    <ProtectedRoute>
+      <div className="min-h-screen" style={{ backgroundColor: "#ffffff" }}>
+        {/* Usando o componente Navbar */}
+        <Navbar currentPage="usuarios" usuario={usuario || undefined} onLogout={handleLogout} />
+        <div style={{height: 60}} /> {/* Espaço para a navbar fixa */}
 
-      {/* Main Content */}
-      <main className="max-w-2xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        {/* Header da página */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <UserPlus className="h-8 w-8 text-blue-600" />
-            <h1 className="text-3xl font-bold text-gray-900">Cadastrar Usuário (SEM PROTECTION)</h1>
+        {/* Main Content */}
+        <main className="max-w-2xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+          {/* Header da página */}
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-2">
+              <UserPlus className="h-8 w-8 text-blue-600" />
+              <h1 className="text-3xl font-bold text-gray-900">Cadastrar Usuário</h1>
+            </div>
+            <p className="text-gray-600">Crie novos usuários no sistema com diferentes níveis de acesso</p>
           </div>
-          <p className="text-gray-600">Versão de teste sem ProtectedRoute para identificar o problema</p>
-        </div>
 
         {success ? (
           <Card className="border-green-200 bg-green-50">
@@ -290,8 +292,9 @@ export default function CadastrarUsuarioPage() {
               </form>
             </CardContent>
           </Card>
-        )}
-      </main>
-    </div>
-  )
+                 )}
+       </main>
+     </div>
+     </ProtectedRoute>
+   )
 } 
