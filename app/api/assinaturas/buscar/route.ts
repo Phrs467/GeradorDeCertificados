@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { collection, query, where, getDocs, getFirestore } from 'firebase/firestore'
 import { firebaseApp } from '@/lib/firebase'
 
+// Forçar renderização dinâmica para evitar erro de build
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl
