@@ -4,7 +4,7 @@ import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
+    const { searchParams } = request.nextUrl
     const id = searchParams.get('id')
 
     console.log('🔍 Verificando certificado com ID:', id)

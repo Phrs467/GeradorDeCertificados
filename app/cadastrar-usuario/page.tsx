@@ -38,17 +38,38 @@ export default function CadastrarUsuarioPage() {
   const [funcao, setFuncao] = useState("")
 
   useEffect(() => {
+    console.log("🚀 Iniciando página de cadastro de usuários...")
+    
     try {
+      // Verificar se estamos no cliente
+      if (typeof window === 'undefined') {
+        console.log("⚠️ Executando no servidor (SSR)")
+        return
+      }
+
+      console.log("✅ Executando no cliente")
+      
       // Obter dados do usuário da sessão para exibir na navbar
+      console.log("🔍 Verificando sessão do usuário...")
       const sessionUser = sessionStorage.getItem('usuario')
       if (sessionUser) {
-        const usuarioData = JSON.parse(sessionUser) as Usuario
-        setUsuario(usuarioData)
+        try {
+          const usuarioData = JSON.parse(sessionUser) as Usuario
+          console.log("✅ Usuário encontrado na sessão:", usuarioData.nome)
+          setUsuario(usuarioData)
+        } catch (parseError) {
+          console.error("❌ Erro ao parsear dados da sessão:", parseError)
+        }
+      } else {
+        console.log("⚠️ Nenhum usuário na sessão")
       }
+      
+      console.log("✅ Página inicializada com sucesso")
     } catch (error) {
-      console.error("❌ Erro ao obter dados da sessão:", error)
+      console.error("❌ Erro ao inicializar página:", error)
     } finally {
       setLoading(false)
+      console.log("🏁 Loading finalizado")
     }
   }, [])
 
@@ -71,50 +92,56 @@ export default function CadastrarUsuarioPage() {
         return
       }
 
-      // Verificar se email já existe
-      try {
-        const db = getFirestore(firebaseApp as any)
-        const usuariosRef = collection(db, "usuarios")
-        const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
-        const querySnapshot = await getDocs(q)
+      console.log("📝 Criando usuário:", { nome, email, funcao })
 
-        if (!querySnapshot.empty) {
-          setError("Email já cadastrado no sistema")
-          return
-        }
-
-        // Criar data de expiração (1 ano a frente)
-        const dataExpiracao = new Date()
-        dataExpiracao.setFullYear(dataExpiracao.getFullYear() + 1)
-
-        // Criar novo usuário
-        const novoUsuario = {
-          nome: nome.trim(),
-          email: email.toLowerCase().trim(),
-          funcao: funcao,
-          chave_de_acesso: dataExpiracao.toISOString(),
-          primeiro_login: true,
-          senha: null, // Senha será definida no primeiro login
-          data_criacao: new Date().toISOString()
-        }
-
-        await addDoc(usuariosRef, novoUsuario)
-
-        console.log("✅ Usuário criado com sucesso!")
-        setSuccess(true)
-        
-        // Limpar formulário
-        setNome("")
-        setEmail("")
-        setFuncao("")
-      } catch (firebaseError) {
-        console.error("❌ Erro do Firebase:", firebaseError)
-        setError("Erro de conexão com o banco de dados. Verifique sua conexão com a internet.")
+      // Verificar se o Firebase está disponível
+      if (!firebaseApp) {
+        throw new Error("Firebase não está disponível")
       }
+
+      // Verificar se email já existe
+      const db = getFirestore(firebaseApp as any)
+      const usuariosRef = collection(db, "usuarios")
+      const q = query(usuariosRef, where("email", "==", email.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+
+      if (!querySnapshot.empty) {
+        setError("Email já cadastrado no sistema")
+        return
+      }
+
+      // Criar data de expiração (1 ano a frente)
+      const dataExpiracao = new Date()
+      dataExpiracao.setFullYear(dataExpiracao.getFullYear() + 1)
+
+      // Criar novo usuário
+      const novoUsuario = {
+        nome: nome.trim(),
+        email: email.toLowerCase().trim(),
+        funcao: funcao,
+        chave_de_acesso: dataExpiracao.toISOString(),
+        primeiro_login: true,
+        senha: null, // Senha será definida no primeiro login
+        data_criacao: new Date().toISOString()
+      }
+
+      await addDoc(usuariosRef, novoUsuario)
+
+      console.log("✅ Usuário criado com sucesso!")
+      setSuccess(true)
+      
+      // Limpar formulário
+      setNome("")
+      setEmail("")
+      setFuncao("")
 
     } catch (error) {
       console.error("❌ Erro ao criar usuário:", error)
-      setError("Erro interno do servidor")
+      if (error instanceof Error) {
+        setError(`Erro: ${error.message}`)
+      } else {
+        setError("Erro interno do servidor")
+      }
     } finally {
       setSubmitting(false)
     }
